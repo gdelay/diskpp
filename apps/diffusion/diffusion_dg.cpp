@@ -104,6 +104,18 @@ void
 run_diffusion_solver(Mesh& msh)
 {
     auto nc = compute_neighbour_connectivity(msh);
+    
+    for (auto& cl : msh)
+    {
+        std::cout << cl << std::endl;
+        auto fcs = faces(msh, cl);
+        for (auto& fc : fcs)
+        {
+            auto ncl = nc.neighbour_via(msh, cl, fc);
+            if (ncl.second)
+                std::cout << fc << " -> " << ncl.first << std::endl;
+        }
+    }
 }
 
 int main(int argc, char **argv)

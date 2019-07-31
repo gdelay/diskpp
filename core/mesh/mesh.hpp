@@ -596,11 +596,93 @@ offset(const Mesh& msh, const typename Mesh::face_type& fc)
     
     return std::distance(msh.faces_begin(), itor);
 }
-    
+
+#if (__cplusplus >= 201703L)
+#include <optional>
 template<typename Mesh>
 class neighbour_connectivity
 {
     typedef typename Mesh::cell_type                    cell_type;
+    typedef typename Mesh::face_type                    face_type;
+    typedef std::optional<typename cell_type::id_type>  optional_cellid_type;
+    typedef std::array<optional_cellid_type, 2>         face_owners_type;
+    std::vector<face_owners_type>                       face_owners;
+
+    void compute_connectivity(const Mesh& msh)
+    {
+        face_owners.resize( msh.faces_size() );
+        
+        for (auto& fo : face_owners)
+        {
+            fo[0] = {};
+            fo[1] = {};
+        }
+        
+        size_t cell_i = 0;
+        for (auto& cl : msh)
+        {
+            auto fcs = faces(msh, cl);
+            
+            for (auto& fc : fcs)
+            {
+                auto fi = find_element_id(msh.faces_begin(), msh.faces_end(), fc);
+                if (!fi.first)
+                {
+                    std::stringstream ss;
+                    ss << fc << ": Face not present in mesh";
+                    throw std::invalid_argument(ss.str());
+                }
+                auto fc_id = offset(msh, fc);
+                
+                auto&  fo = face_owners.at(fc_id);
+                if (!fo[0])
+                    fo[0] = typename cell_type::id_type(cell_i);
+                else if (!fo[1])
+                    fo[1] = typename cell_type::id_type(cell_i);
+                else
+                    throw std::logic_error("BUG: a face has max 2 owners");
+            }
+            
+            ++cell_i;
+        }
+    }
+    
+public:
+    neighbour_connectivity(const Mesh& msh)
+    {
+        compute_connectivity(msh);
+    }
+    
+    std::optional<cell_type>
+    neighbour_via(const Mesh& msh, const cell_type& cl, const face_type& fc)
+    {
+        if ( face_owners.size() != msh.faces_size() )
+            throw std::logic_error("Inconsistent neighbour information.");
+        
+        auto cl_ofs = offset(msh, cl);
+        auto fc_ofs = offset(msh, fc);
+        
+        auto fo = face_owners.at( fc_ofs );
+        
+        if ( fo[0] != cl_ofs )
+            std::swap(fo[0], fo[1]);
+        
+        assert(fo[0] == cl_ofs);
+        
+        if (!fo[1])
+            return {};
+        
+        return *std::next(msh.cells_begin(), fo[1].value());
+    }
+};
+    
+#else /* __cplusplus >= 201703L */
+
+template<typename Mesh>
+class neighbour_connectivity
+{
+    typedef typename Mesh::cell_type                    cell_type;
+    typedef typename Mesh::face_type                    face_type;
     typedef std::array<typename cell_type::id_type, 2>  face_owners_type;
     std::vector<face_owners_type>                       face_owners;
     
@@ -650,7 +732,31 @@ public:
     {
         compute_connectivity(msh);
     }
+    
+    std::pair<cell_type, bool>
+    neighbour_via(const Mesh& msh, const cell_type& cl, const face_type& fc)
+    {
+        if ( face_owners.size() != msh.faces_size() )
+            throw std::logic_error("Inconsistent neighbour information.");
+        
+        auto cl_ofs = offset(msh, cl);
+        auto fc_ofs = offset(msh, fc);
+        
+        auto fo = face_owners.at( fc_ofs );
+        
+        if ( fo[0] != cl_ofs )
+            std::swap(fo[0], fo[1]);
+        
+        assert(fo[0] == cl_ofs);
+        
+        if (fo[1] == NO_OWNER)
+            return std::make_pair(*msh.cells_begin(), false);
+        
+        return std::make_pair( *std::next(msh.cells_begin(), fo[1]), true);
+    }
 };
+
+#endif /* __cplusplus >= 201703L */
     
 template<typename Mesh>
 auto compute_neighbour_connectivity(const Mesh& msh)
