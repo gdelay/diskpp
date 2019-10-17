@@ -50,3 +50,6 @@ target_link_libraries(netgen_primitives ${LINK_LIBS})
 add_executable(behaviors_test behaviors_test.cpp)
 target_link_libraries(behaviors_test ${LINK_LIBS})
 
+add_executable(sm_driver sm_driver.cpp)
+target_link_libraries(sm_driver ${LINK_LIBS})
+
