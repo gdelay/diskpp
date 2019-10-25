@@ -575,28 +575,6 @@ public:
     }
 };
 
-template<typename Mesh>
-size_t
-offset(const Mesh& msh, const typename Mesh::cell_type& cl)
-{
-    auto itor = std::lower_bound(msh.cells_begin(), msh.cells_end(), cl);
-    if ( itor == msh.cells_end() )
-        throw std::logic_error("Cell not found: this is likely a bug.");
-    
-    return std::distance(msh.cells_begin(), itor);
-}
-
-template<typename Mesh>
-size_t
-offset(const Mesh& msh, const typename Mesh::face_type& fc)
-{
-    auto itor = std::lower_bound(msh.faces_begin(), msh.faces_end(), fc);
-    if ( itor == msh.faces_end() )
-        throw std::logic_error("Face not found: this is likely a bug.");
-    
-    return std::distance(msh.faces_begin(), itor);
-}
-
 #if (__cplusplus >= 201703L)
 #include <optional>
 template<typename Mesh>
@@ -759,7 +737,7 @@ public:
 #endif /* __cplusplus >= 201703L */
     
 template<typename Mesh>
-auto compute_neighbour_connectivity(const Mesh& msh)
+auto connectivity_via_faces(const Mesh& msh)
 {
     return neighbour_connectivity<Mesh>(msh);
 }

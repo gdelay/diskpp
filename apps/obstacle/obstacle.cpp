@@ -190,6 +190,25 @@ struct obstacle_functor< Mesh<T,2,Storage> >
     }
 };
 
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct obstacle_functor< Mesh<T,3,Storage> >
+{
+    typedef Mesh<T,3,Storage>                       mesh_type;
+    typedef typename mesh_type::coordinate_type     scalar_type;
+    typedef typename mesh_type::point_type          point_type;
+
+    scalar_type operator()(const point_type& pt) const
+    {
+        return 0.0;
+    }
+};
+
+template<typename Mesh>
+auto make_obstacle_function(const Mesh& msh)
+{
+    return obstacle_functor<Mesh>();
+}
+
 /* Assembler for the obstacle problem (see "Bubbles enriched quadratic finite
  * element method for the 3D-elliptic obstacle problem - S. Gaddam, T. Gudi",
  * eqn. 5.1 onwards) */
