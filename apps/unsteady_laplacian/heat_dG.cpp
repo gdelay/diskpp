@@ -344,8 +344,10 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
     time_loader.populate_mesh(time_mesh);
 
     auto time_cell = *time_mesh.cells_begin();
+    auto next_time_cell = *(++time_mesh.cells_begin());
 
     auto time_cb = make_scalar_monomial_basis(time_mesh, time_cell, time_degree);
+    auto time_cb_next = make_scalar_monomial_basis(time_mesh, next_time_cell, time_degree);
     auto time_mass = make_mass_matrix(time_mesh, time_cell, time_cb);
 
     Matrix<T, Dynamic, Dynamic> time_deriv = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
@@ -355,6 +357,27 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	auto phi   = time_cb.eval_functions( qp.point() );
 	auto phi_t = time_cb.eval_gradients( qp.point() );
 	time_deriv += qp.weight() * phi * phi_t; // check the order
+    }
+
+    //////
+    Matrix<T, Dynamic, Dynamic> time_loc = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
+    auto t_fcs = faces(time_mesh, time_cell);
+    auto qps_f_t = integrate(time_mesh, t_fcs[0], 2*time_degree);
+    for (auto& qp : qps_f_t)
+    {
+	auto phi   = time_cb.eval_functions( qp.point() );
+	time_loc += qp.weight() * phi * phi;
+    }
+
+    //////
+    Matrix<T, Dynamic, Dynamic> time_loc_bis = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
+    // auto t_fcs = faces(time_mesh, time_cell);
+    auto qps_f_t_bis = integrate(time_mesh, t_fcs[1], 2*time_degree);
+    for (auto& qp : qps_f_t_bis)
+    {
+	auto phi_prev   = time_cb.eval_functions( qp.point() );
+	auto phi_next   = time_cb_next.eval_functions( qp.point() );
+	time_loc_bis += qp.weight() * phi_next * phi_prev;
     }
 
     tc.tic();
@@ -404,16 +427,30 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	    for(size_t l2 = 0; l2 <= time_degree; l2++)
 		lhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_deriv(l1,l2);
 
-        Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs_space.cols());
+	// jump term (cell - cell only)
+	for(size_t l1 = 0; l1 <= time_degree; l1++)
+	    for(size_t l2 = 0; l2 <= time_degree; l2++)
+		lhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc(l1,l2);
+
+	Matrix<scalar_type, Dynamic, Dynamic> mat_rhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(ah.cols()*(time_degree+1), ah.cols()*(time_degree+1));
+	// jump term (cell - cell only)
+	for(size_t l1 = 0; l1 <= time_degree; l1++)
+	    for(size_t l2 = 0; l2 <= time_degree; l2++)
+		mat_rhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc_bis(l1,l2);
+
+
+
+	Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs_space.cols());
         // rhs.head(cbs) = make_rhs(msh, cl, cb, rhs_fun, 1);
 
         // apply_dirichlet_via_nitsche(msh, cl, gr.first, lhs_space, rhs, hdi, bcs_fun, penalization);
 
-        Matrix<scalar_type, Dynamic, Dynamic> cell_mass = make_mass_matrix(msh, cl, cb);
-        lhs_space = lhs_space*dt;
-        lhs_space.block(0,0,cbs,cbs) += cell_mass;
+        // Matrix<scalar_type, Dynamic, Dynamic> cell_mass = make_mass_matrix(msh, cl, cb);
+        // lhs_space = lhs_space*dt;
+        // lhs_space.block(0,0,cbs,cbs) += cell_mass;
 
         /* Make local-to-global mapping */
+	////// !!! UPDATE THIS !!!
         std::vector<size_t> l2g(cbs + fcs.size() * fbs);
         for (size_t i = 0; i < cbs; i++)
             l2g[i] = cell_i*cbs + i;
@@ -434,8 +471,11 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
             RHS(l2g[i]) += rhs(i);
         }
 
+	// ici il faudrait assembler aussi rhs pour le premier pas de temps
+	// et on assemblera rhs pour les autres pas de temps plus loin ...
+
 	/* set initial datum */
-	Mu_prev.block(cell_i*cbs,0,cbs,1) = cell_mass * disk::project_function(msh, cl, degree, init_fun);
+	// Mu_prev.block(cell_i*cbs,0,cbs,1) = cell_mass * disk::project_function(msh, cl, degree, init_fun);
 
         cell_i++;
     }
