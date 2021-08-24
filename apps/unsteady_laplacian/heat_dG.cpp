@@ -38,6 +38,7 @@
 
 using namespace disk;
 using namespace Eigen;
+using namespace std;
 
 
 ////////////////// time dG Assembler /////////////////
@@ -51,11 +52,11 @@ class heat_dG_assembler
     std::vector<size_t>     expand_table;
     hho_degree_info         di;
     size_t                  time_degree;
-    std::vector<Triplet<T>> triplets;
+    std::vector<Triplet<T>> triplets, triplets_MAT_RHS;
 
     size_t num_all_faces, num_dirichlet_faces, num_other_faces, num_cells, space_system_size, system_size;
 
-        class assembly_index
+    class assembly_index
     {
         size_t idx;
         bool   assem;
@@ -89,8 +90,8 @@ class heat_dG_assembler
     typedef dynamic_matrix<T> matrix_type;
     typedef dynamic_vector<T> vector_type;
 
-    SparseMatrix<T> LHS;
-    vector_type     RHS;
+    SparseMatrix<T> LHS, MAT_RHS;
+    vector_type     RHS, RHS_F;
 
     heat_dG_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree)
 	: di(hdi), time_degree(t_degree)
@@ -123,17 +124,21 @@ class heat_dG_assembler
 	system_size = space_system_size * (time_degree + 1);
 
 	LHS = SparseMatrix<T>(system_size, system_size);
+	MAT_RHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
+	RHS_F = vector_type::Zero(system_size);
     }
 
     // here the Dirichlet data are not time-dependent
-    template<typename Function>
+    template<typename Function, typename Function2>
     void
     assemble(const Mesh&                     msh,
              const typename Mesh::cell_type& cl,
              const matrix_type&              lhs,
              const vector_type&              rhs,
-             const Function&                 dirichlet_bf)
+	     const matrix_type&              mat_rhs,
+             const Function&                 dirichlet_bf,
+	     const Function2&                 init_fun)
     {
 	auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
 
@@ -147,9 +152,12 @@ class heat_dG_assembler
         asm_map.reserve(loc_size);
 
 	auto cell_offset = offset(msh, cl);
-	for(size_t l = 0; l <= time_degree; l++)
-	    for(size_t i = 0; i < cbs; i++)
-		asm_map.push_back(assembly_index(space_system_size * l + cell_offset * cbs + i));
+	// for(size_t l = 0; l <= time_degree; l++)
+	//     for(size_t i = 0; i < cbs; i++)
+	// 	asm_map.push_back(assembly_index(space_system_size * l + cell_offset * cbs + i));
+
+	for(size_t i = 0; i < cbs*(time_degree+1); i++)
+	    asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) + i, true));
 
 	vector_type dirichlet_data = vector_type::Zero(fcs.size() * fbs);
 
@@ -157,13 +165,18 @@ class heat_dG_assembler
         {
             const auto fc              = fcs[face_i];
             const auto face_offset     = fcs_id[face_i]; // offset(msh, fc);
-            const auto face_LHS_offset = compress_table.at(face_offset) * fbs;
+            const auto face_LHS_offset = num_cells * cbs * (time_degree+1)
+		+ compress_table.at(face_offset) * fbs * (time_degree+1);
 
             const bool dirichlet = is_dirichlet(fc);
 
-	    for(size_t l = 0; l <= time_degree; l++)
-		for (size_t i = 0; i < fbs; i++)
-		    asm_map.push_back(assembly_index(space_system_size * l + num_cells * cbs + face_LHS_offset + i, !dirichlet));
+	    // for(size_t l = 0; l <= time_degree; l++)
+	    // 	for (size_t i = 0; i < fbs; i++)
+	    // 	    asm_map.push_back(assembly_index(space_system_size * l + num_cells * cbs + face_LHS_offset + i, !dirichlet));
+
+
+	    for (size_t i = 0; i < fbs*(time_degree+1); i++)
+		asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
 
 	    // Dirichlet data are not taken into account for the moment
             // if (dirichlet)
@@ -173,6 +186,13 @@ class heat_dG_assembler
             // }
         }
 
+	
+	// compute initial datum contribution to RHS
+	// auto u0 = project_function(msh, cl, di.cell_degree(), init_fun, di.cell_degree());
+	vector_type u0 = vector_type::Zero(loc_size);
+	u0.block(0,0,cbs,1) = project_function(msh, cl, di.cell_degree(), init_fun, di.cell_degree());
+	auto rhs_modif = mat_rhs * u0 + rhs;
+
 	for (size_t i = 0; i < lhs.rows(); i++)
         {
             if (!asm_map[i].assemble())
@@ -181,13 +201,17 @@ class heat_dG_assembler
             for (size_t j = 0; j < lhs.cols(); j++)
             {
                 if (asm_map[j].assemble())
+		{
                     triplets.push_back(Triplet<T>(asm_map[i], asm_map[j], lhs(i, j)));
+		    triplets_MAT_RHS.push_back(Triplet<T>(asm_map[i], asm_map[j], mat_rhs(i, j)));
+		}
 		// Dirichlet not taken into account
                 // else
                 //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
             }
 
-            RHS(asm_map[i]) += rhs(i);
+            RHS(asm_map[i]) += rhs_modif(i);
+	    RHS_F(asm_map[i]) += rhs(i);
         }
     } // assemble()
 
@@ -209,9 +233,14 @@ class heat_dG_assembler
 	auto cell_offset = offset(msh, cl);
 
 	// cell components
-	for(int l=0; l<=time_degree; l++)
-	    ret.block(l*cbs, 0, cbs, 1)
-		= solution.block(l * space_system_size + cell_offset * cbs, 0, cbs, 1);
+	// for(int l=0; l<=time_degree; l++)
+	//     ret.block(l*cbs, 0, cbs, 1)
+	// 	= solution.block(l * space_system_size + cell_offset * cbs, 0, cbs, 1);
+
+	
+	
+	ret.block(0, 0, (time_degree+1)*cbs, 1)
+	    = solution.block(cell_offset * cbs * (time_degree+1), 0, (time_degree+1)*cbs, 1);
 
 
 	// face components
@@ -234,11 +263,12 @@ class heat_dG_assembler
             if(!dirichlet)
             {
                 const auto face_offset     = offset(msh, fc);
-                const auto face_SOL_offset = compress_table.at(face_offset) * fbs;
+                const auto face_SOL_offset = num_cells * cbs * (time_degree+1)
+		    + compress_table.at(face_offset) * fbs * (time_degree+1);
 
-		for(int l=0; l <= time_degree; l++)
-		    ret.block(cbs * (time_degree+1) + (face_i * time_degree + l) * fbs, 0, fbs, 1)
-			= solution.block(l * space_system_size + face_SOL_offset * fbs, 0, fbs, 1);
+		
+		ret.block(cbs * (time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
+		    = solution.block(face_SOL_offset, 0, fbs * (time_degree+1), 1);
             }
 	}
 
@@ -249,7 +279,9 @@ class heat_dG_assembler
     finalize(void)
     {
         LHS.setFromTriplets(triplets.begin(), triplets.end());
+	MAT_RHS.setFromTriplets(triplets_MAT_RHS.begin(), triplets_MAT_RHS.end());
         triplets.clear();
+	triplets_MAT_RHS.clear();
 
         // dump_sparse_matrix(LHS, "diff.dat");
     }
@@ -296,6 +328,8 @@ export_to_silo(const Mesh<T, 2, Storage>& msh,
     silo.close();
 }
 
+///////////////////////////////////////
+
 template<typename Mesh>
 bool
 unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordinate_type dt,
@@ -314,33 +348,39 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 
     auto assembler = make_heat_dG_assembler(msh, hdi, time_degree);
 
-    SparseMatrix<scalar_type>           LHS;
-    Matrix<scalar_type, Dynamic, 1>     RHS;
-    std::vector<Triplet<scalar_type>>   triplets;
+    // SparseMatrix<scalar_type>           LHS;
+    // SparseMatrix<scalar_type>           MAT_RHS;
+    // Matrix<scalar_type, Dynamic, 1>     RHS;
+    // std::vector<Triplet<scalar_type>>   triplets;
 
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
     auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
+    // TODO : update system_size
     auto system_size = cbs*num_cells + fbs*num_faces;
 
-    LHS = SparseMatrix<scalar_type>(system_size, system_size);
-    RHS = Matrix<scalar_type, Dynamic, 1>::Zero(system_size);
+    // LHS = SparseMatrix<scalar_type>(system_size, system_size);
+    // MAT_RHS = SparseMatrix<scalar_type>(system_size, system_size);
+    
+    // RHS = Matrix<scalar_type, Dynamic, 1>::Zero(system_size);
     Matrix<scalar_type, Dynamic, 1> Mu_prev = Matrix<scalar_type, Dynamic, 1>::Zero(system_size);
 
     timecounter tc;
 
     int K = 1; // index for the exact solution
 
-    auto rhs_fun = [](const point_type& pt) -> auto { return 0.0; };
+    auto rhs_fun = [K](const point_type& pt) -> auto { return 2*M_PI*M_PI*std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y()); };
     auto bcs_fun = [](const point_type& pt) -> auto { return 0.0; };
-    auto solution= [K](const double t, const point_type& pt) -> auto { return std::exp(-2*M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y()); };
+    // auto solution= [K](const double t, const point_type& pt) -> auto { return std::exp(-2*M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y()); };
+    auto solution= [K](const double t, const point_type& pt) -> auto { return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y()); };
     auto init_fun = [K](const point_type& pt) -> scalar_type {
 			return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
 		    };
 
 
-    size_t num_time = 100;
+    size_t num_time = 2. / dt + 1;
+    cout << "num_time = " << num_time << endl;
     disk::generic_mesh<T, 1>  time_mesh;
-    disk::uniform_mesh_loader<T, 1> time_loader(0, 1, num_time);
+    disk::uniform_mesh_loader<T, 1> time_loader(0, 2, num_time);
     time_loader.populate_mesh(time_mesh);
 
     auto time_cell = *time_mesh.cells_begin();
@@ -349,6 +389,8 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
     auto time_cb = make_scalar_monomial_basis(time_mesh, time_cell, time_degree);
     auto time_cb_next = make_scalar_monomial_basis(time_mesh, next_time_cell, time_degree);
     auto time_mass = make_mass_matrix(time_mesh, time_cell, time_cb);
+
+    cout << "time_mass(0,0) = " << time_mass(0,0) << endl;
 
     Matrix<T, Dynamic, Dynamic> time_deriv = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
     auto qps_t = integrate(time_mesh, time_cell, 2*time_degree);
@@ -359,6 +401,8 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	time_deriv += qp.weight() * phi * phi_t; // check the order
     }
 
+    cout << "time_deriv(0,0) = " << time_deriv(0,0) << endl;
+    
     //////
     Matrix<T, Dynamic, Dynamic> time_loc = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
     auto t_fcs = faces(time_mesh, time_cell);
@@ -369,6 +413,8 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	time_loc += qp.weight() * phi * phi;
     }
 
+    cout << "time_loc(0,0) = " << time_loc(0,0) << endl;
+
     //////
     Matrix<T, Dynamic, Dynamic> time_loc_bis = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
     // auto t_fcs = faces(time_mesh, time_cell);
@@ -377,8 +423,10 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
     {
 	auto phi_prev   = time_cb.eval_functions( qp.point() );
 	auto phi_next   = time_cb_next.eval_functions( qp.point() );
-	time_loc_bis += qp.weight() * phi_next * phi_prev;
+	time_loc_bis += qp.weight() * phi_next * phi_prev;  // il va possiblement faloir ajouter un transpose ici ...
     }
+
+    cout << "time_loc_bis(0,0) = " << time_loc_bis(0,0) << endl;
 
     tc.tic();
     size_t cell_i = 0;
@@ -438,9 +486,11 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	    for(size_t l2 = 0; l2 <= time_degree; l2++)
 		mat_rhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc_bis(l1,l2);
 
-
-
 	Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs_space.cols());
+
+	assembler.assemble(msh, cl, lhs, rhs, mat_rhs, bcs_fun, init_fun);
+
+	// Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs_space.cols());
         // rhs.head(cbs) = make_rhs(msh, cl, cb, rhs_fun, 1);
 
         // apply_dirichlet_via_nitsche(msh, cl, gr.first, lhs_space, rhs, hdi, bcs_fun, penalization);
@@ -449,27 +499,28 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
         // lhs_space = lhs_space*dt;
         // lhs_space.block(0,0,cbs,cbs) += cell_mass;
 
-        /* Make local-to-global mapping */
+        /* Make local-to-global mapping (useful for mat_rhs) */
 	////// !!! UPDATE THIS !!!
-        std::vector<size_t> l2g(cbs + fcs.size() * fbs);
-        for (size_t i = 0; i < cbs; i++)
-            l2g[i] = cell_i*cbs + i;
+        // std::vector<size_t> l2g( (time_degree+1) * (cbs + fcs.size() * fbs) );
+        // for (size_t i = 0; i < cbs * (time_degree+1); i++)
+        //     l2g[i] = cell_i*cbs*(time_degree+1) + i;
 
-        for (size_t i = 0; i < fcs.size(); i++)
-        {
-            auto f_ofs = offset(msh, fcs[i]);
-            for (size_t j = 0; j < fbs; j++)
-                l2g[cbs + i*fbs+j] = cbs*num_cells + f_ofs*fbs+j;
-        }
+        // for (size_t i = 0; i < fcs.size(); i++)
+        // {
+        //     auto f_ofs = offset(msh, fcs[i]);
+        //     for (size_t j = 0; j < fbs * (time_degree+1); j++)
+        //         l2g[cbs * (time_degree+1) + i*fbs*(time_degree+1)+j]
+	// 	    = (time_degree+1)*cbs*num_cells + (time_degree+1)*f_ofs*fbs+j;
+        // }
 
-        /* Assemble cell contributions */
-        for (size_t i = 0; i < lhs_space.rows(); i++)
-        {
-            for (size_t j = 0; j < lhs_space.cols(); j++)
-                triplets.push_back( Triplet<scalar_type>(l2g[i], l2g[j], lhs_space(i,j)) );
+        // /* Assemble cell contributions */
+        // for (size_t i = 0; i < lhs_space.rows(); i++)
+        // {
+        //     for (size_t j = 0; j < lhs_space.cols(); j++)
+        //         triplets.push_back( Triplet<scalar_type>(l2g[i], l2g[j], lhs_space(i,j)) );
 
-            RHS(l2g[i]) += rhs(i);
-        }
+        //     RHS(l2g[i]) += rhs(i);
+        // }
 
 	// ici il faudrait assembler aussi rhs pour le premier pas de temps
 	// et on assemblera rhs pour les autres pas de temps plus loin ...
@@ -477,20 +528,42 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	/* set initial datum */
 	// Mu_prev.block(cell_i*cbs,0,cbs,1) = cell_mass * disk::project_function(msh, cl, degree, init_fun);
 
+	// assemble cell contribution
+	// TODO : update dof sorting in the assembler
+
+
+	// assemble MAT_RHS
+	// difficulte : prise en compte des conditions de Dirichlet ...
+	// sol : il faudrait gerer l'assemblage de cette matrice avec l'assembler ...
+	// --> ajouter une methode assemble MAT_RHS
+	// for (size_t i = 0; i < lhs_space.rows(); i++)
+        // {
+        //     for (size_t j = 0; j < lhs_space.cols(); j++)
+        //         triplets.push_back( Triplet<scalar_type>(l2g[i], l2g[j], lhs_space(i,j)) );
+
+        //     RHS(l2g[i]) += rhs(i);
+        // }
+
         cell_i++;
     }
 
-    LHS.setFromTriplets(triplets.begin(), triplets.end());
+    assembler.finalize();
+
+    // LHS.setFromTriplets(triplets.begin(), triplets.end());
+    auto LHS = assembler.LHS;
+    auto MAT_RHS = assembler.MAT_RHS;
+    auto RHS = assembler.RHS;
+    auto RHS_F = assembler.RHS_F;
 
     tc.toc();
-    std::cout << " Assembly time: " << tc << std::endl;
+    std::cout << " Assembly time: " << tc << std::endl;    
 
 
     Matrix<scalar_type, Dynamic, 1> u;
     scalar_type t = 0.0;
     scalar_type L2H1_error = 0.;
 
-    size_t freq_exp = 100;
+    size_t freq_exp = 1;
 
     // time loop
     for (size_t i = 0; t < 2.0; i++, t += dt)
@@ -498,27 +571,29 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 	if(i % freq_exp == 0)
 	    std::cout << "Step " << i << std::endl;
         disk::solvers::pardiso_params<scalar_type> pparams;
-        Matrix<scalar_type, Dynamic, 1> Mupp = Mu_prev;
-        Mupp.tail(msh.faces_size() * fbs) = Matrix<scalar_type, Dynamic, 1>::Zero(msh.faces_size() * fbs);
-        Mupp = Mupp + dt*RHS;
-        mkl_pardiso(pparams, LHS, Mupp, u);
+        // Matrix<scalar_type, Dynamic, 1> Mupp = Mu_prev;
+        // Mupp.tail(msh.faces_size() * fbs) = Matrix<scalar_type, Dynamic, 1>::Zero(msh.faces_size() * fbs);
+        // Mupp = Mupp + dt*RHS;
+        mkl_pardiso(pparams, LHS, RHS, u);
 
         Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
 
         for (size_t i = 0; i < msh.cells_size(); i++)
-            sol_silo(i) = u(i*cbs);
+            sol_silo(i) = u(i*cbs*(time_degree+1));
 
 	if(i % freq_exp == 0)
 	    export_to_silo( msh, sol_silo, i );
 
-        Mu_prev = Matrix<scalar_type, Dynamic, 1>::Zero(system_size);
+        // Mu_prev = Matrix<scalar_type, Dynamic, 1>::Zero(system_size);
 
+	// update RHS with the previous solution
+	RHS = RHS_F + MAT_RHS * u;
         cell_i = 0;
         for (auto& cl : msh)
         {
             auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
-            Matrix<scalar_type, Dynamic, Dynamic> cell_mass = make_mass_matrix(msh, cl, cb);
-            Mu_prev.block(cbs*cell_i, 0, cbs, 1) = cell_mass*u.block(cbs*cell_i, 0, cbs, 1);
+            // Matrix<scalar_type, Dynamic, Dynamic> cell_mass = make_mass_matrix(msh, cl, cb);
+            // Mu_prev.block(cbs*cell_i, 0, cbs, 1) = cell_mass*u.block(cbs*cell_i, 0, cbs, 1);
 
 
 	    // solution
@@ -542,8 +617,8 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 
             cell_i++;
         }
-   }
-
+    } // time loop
+    
     std::cout << "L2-H1-error = " << std::sqrt(L2H1_error) << std::endl;
 
     /*
@@ -571,7 +646,7 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 }
 
 /* run main with :
-   ./unsteady_laplacian -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -t 0.01
+   ./heat_dG -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -t 0.01
 */
 
 
