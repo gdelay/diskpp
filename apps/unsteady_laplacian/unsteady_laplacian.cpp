@@ -141,7 +141,7 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
         }
 
 	/* set initial datum */
-	Mu_prev.block(cell_i*cbs,0,cbs,1) = cell_mass * disk::project_function(msh, cl, degree, init_fun);
+        Mu_prev.block(cell_i*cbs,0,cbs,1) = cell_mass * disk::project_function(msh, cl, degree, init_fun);
 
         cell_i++;
     }
@@ -161,8 +161,8 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
     // time loop
     for (size_t i = 0; t < 2.0; i++, t += dt)
     {
-	if(i % freq_exp == 0)
-	    std::cout << "Step " << i << std::endl;
+        if(i % freq_exp == 0)
+            std::cout << "Step " << i << std::endl;
         disk::solvers::pardiso_params<scalar_type> pparams;
         Matrix<scalar_type, Dynamic, 1> Mupp = Mu_prev;
         Mupp.tail(msh.faces_size() * fbs) = Matrix<scalar_type, Dynamic, 1>::Zero(msh.faces_size() * fbs);
@@ -174,8 +174,8 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
         for (size_t i = 0; i < msh.cells_size(); i++)
             sol_silo(i) = u(i*cbs);
 
-	if(i % freq_exp == 0)
-	    export_to_silo( msh, sol_silo, i );
+        if(i % freq_exp == 0)
+            export_to_silo( msh, sol_silo, i );
 
         Mu_prev = Matrix<scalar_type, Dynamic, 1>::Zero(system_size);
 
@@ -187,24 +187,24 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
             Mu_prev.block(cbs*cell_i, 0, cbs, 1) = cell_mass*u.block(cbs*cell_i, 0, cbs, 1);
 
 
-	    // solution
-	    auto sol_fun = [solution,t](const point_type& pt) -> scalar_type { return solution(t,pt); };
+            // solution
+            auto sol_fun = [solution,t](const point_type& pt) -> scalar_type { return solution(t,pt); };
 
-	    /* compute L2-H1-error of the current time step */
-	    Matrix<scalar_type, Dynamic, 1> sol_ex
-		= disk::project_function(msh, cl, degree, sol_fun);
-	    Matrix<scalar_type, Dynamic, 1> diff = u.block(cell_i*cbs, 0, cbs, 1) - sol_ex;
+            /* compute L2-H1-error of the current time step */
+            Matrix<scalar_type, Dynamic, 1> sol_ex
+                = disk::project_function(msh, cl, degree, sol_fun);
+            Matrix<scalar_type, Dynamic, 1> diff = u.block(cell_i*cbs, 0, cbs, 1) - sol_ex;
 
-	    const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
-	    for(auto& qp : qps)
-	    {
-		const auto g_phi = cb.eval_gradients( qp.point() );
-		Matrix<scalar_type, 1, 2> grad = Matrix<scalar_type, 1, 2>::Zero();
-		for (size_t i = 0; i < cbs; i++ )
-		    grad += diff(i) * g_phi.block(i, 0, 1, 2);
+            const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+            for(auto& qp : qps)
+            {
+                const auto g_phi = cb.eval_gradients( qp.point() );
+                Matrix<scalar_type, 1, 2> grad = Matrix<scalar_type, 1, 2>::Zero();
+                for (size_t i = 0; i < cbs; i++ )
+                    grad += diff(i) * g_phi.block(i, 0, 1, 2);
 
-		L2H1_error += dt * qp.weight() * grad.dot(grad);
-	    }
+                L2H1_error += dt * qp.weight() * grad.dot(grad);
+            }
 
             cell_i++;
         }
@@ -254,19 +254,19 @@ int main(int argc, char **argv)
     {
 	switch(ch)
         {
-	    case 'k':
-		degree = std::stoi(optarg);
+            case 'k':
+                degree = std::stoi(optarg);
                 break;
 
-	    case 'm':
-	        mesh_filename = optarg;
+            case 'm':
+                mesh_filename = optarg;
                 break;
 
-	    case 't':
-		dt = std::stof(optarg);
-		break;
+            case 't':
+                dt = std::stof(optarg);
+                break;
 
-	    default:
+            default:
                 std::cout << "Invalid option" << std::endl;
                 return 1;
 	}
