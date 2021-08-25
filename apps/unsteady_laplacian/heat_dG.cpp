@@ -20,6 +20,11 @@
  * DOI: 10.1016/j.cam.2017.09.017
  */
 
+/*
+ * Attention : penser a changer le triangle des ponts pour le symbole de Sorbonne ...
+ * + mettre mes coordonnees
+ */
+
 /* this file deals with the heat equation with a backward Euler method */
 #include <iostream>
 #include <regex>
@@ -337,7 +342,7 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 
     int K = 1; // index for the exact solution
 
-#if false
+#if true
     auto rhs_fun = [K](const point_type& pt) -> auto { return 2*M_PI*M_PI*K*K*std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y()); };
     auto bcs_fun = [](const point_type& pt) -> auto { return 0.0; };
     auto solution= [K](const double t, const point_type& pt) -> auto { return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y()); };
@@ -397,8 +402,6 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
         time_loc_bis += qp.weight() * phi_next * phi_prev;  // il va possiblement faloir ajouter un transpose ici ...
     }
 
-    cout << "time_loc_bis(0,0) = " << time_loc_bis(0,0) << endl;
-
     tc.tic();
 
     for (auto& cl : msh)
@@ -456,9 +459,12 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 mat_rhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc_bis(l1,l2);
 
+        // the rhs is computed for constant functions
         Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
-        // !! TODO : update this computation for more general time_degree
-        rhs.head(cbs) = make_rhs(msh, cl, cb, rhs_fun, 1) * dt;
+        auto space_rhs = make_rhs(msh, cl, cb, rhs_fun, 1);
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            rhs.block(l1*cbs, 0, cbs, 1) = space_rhs * time_mass(l1,0);
+
 
         assembler.assemble(msh, cl, lhs, rhs, mat_rhs, bcs_fun, init_fun);
     }
@@ -481,7 +487,7 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
     scalar_type t = 0.0;
     scalar_type L2H1_error = 0.;
 
-    size_t freq_exp = 1000;
+    size_t freq_exp = 1;
 
     // time loop
     for (size_t i = 0; t < 2.0; i++, t += dt)
@@ -493,11 +499,16 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
 
         Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
 
-        for (size_t i = 0; i < msh.cells_size(); i++)
-            sol_silo(i) = u(i*cbs*(time_degree+1));
-
         if(i % freq_exp == 0)
+        {
+            for (size_t i = 0; i < msh.cells_size(); i++)
+                sol_silo(i) = u(i*cbs*(time_degree+1));
             export_to_silo( msh, sol_silo, i );
+        }
+
+        auto t_cell = *(time_mesh.cells_begin()+i);
+        auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
+        const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
 
         // update RHS with the previous solution
         RHS = RHS_F + MAT_RHS * u;
@@ -509,21 +520,88 @@ unsteady_laplacian_solver(const Mesh& msh, size_t degree, typename Mesh::coordin
             // solution
             auto sol_fun = [solution,t](const point_type& pt) -> scalar_type { return solution(t,pt); };
 
-            /* compute L2-H1-error of the current time step */
-            Matrix<scalar_type, Dynamic, 1> sol_ex
-                = disk::project_function(msh, cl, degree, sol_fun);
-            Matrix<scalar_type, Dynamic, 1> diff = u.block(cell_i*cbs, 0, cbs, 1) - sol_ex;
-
+            /* compute the L2 projection in space and time */
+            // size_t loc_size = ( faces(msh,cl).size() * fbs + cbs ) * (time_degree + 1);
+            Matrix<scalar_type, Dynamic, 1> rhs_proj
+                = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
             const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+            for(auto& qpt : qpst)
+            {
+                auto t_phi   = t_cb.eval_functions( qpt.point() );
+                T time_point = qpt.point().x();
+
+                for(auto& qp : qps)
+                {
+                    auto x_phi   = cb.eval_functions( qp.point() );
+                    for(size_t l1 = 0; l1 <= time_degree; l1++)
+                    {
+                        rhs_proj.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * solution( time_point, qp.point() ) * x_phi;
+                    }
+                }
+            }
+
+            // use the mass matrix to compute the coordinates of the projection
+            auto cell_mass   = make_mass_matrix(msh, cl, cb);
+            Matrix<scalar_type, Dynamic, Dynamic> mass_matrix
+                = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs*(time_degree+1) , cbs*(time_degree+1));
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+            {
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                {
+                    mass_matrix.block(l1*cbs, l2*cbs, cbs, cbs) = time_mass(l1,l2) * cell_mass;
+                }
+            }
+            Matrix<scalar_type, Dynamic, 1> proj
+                = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
+            LLT< Matrix<scalar_type, Dynamic, Dynamic> > mat_llt;
+            mat_llt.compute(mass_matrix);
+            proj = mat_llt.solve(rhs_proj);
+
+
+            /* compute L2-H1-error of the current time step */
+            // Matrix<scalar_type, Dynamic, 1> sol_ex
+            //     = disk::project_function(msh, cl, degree, sol_fun);
+            Matrix<scalar_type, Dynamic, 1> diff
+                = u.block(cell_i*cbs*(time_degree+1), 0, cbs*(time_degree+1), 1) - proj;
+
+            // const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+
+            // for(auto& qpt: qpst)
+            // {
+            //     auto t_phi   = t_cb.eval_functions( qpt.point() );
+            //     T time_point = qpt.point().x();
+
+            Matrix<scalar_type, Dynamic, Dynamic> grad_matrix
+                = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs , cbs);
+
             for(auto& qp : qps)
             {
                 const auto g_phi = cb.eval_gradients( qp.point() );
-                Matrix<scalar_type, 1, 2> grad = Matrix<scalar_type, 1, 2>::Zero();
-                for (size_t i = 0; i < cbs; i++ )
-                    grad += diff(i) * g_phi.block(i, 0, 1, 2);
+                grad_matrix += qp.weight() * g_phi * g_phi;
+                // Matrix<scalar_type, 1, 2> grad = Matrix<scalar_type, 1, 2>::Zero();
+                // for (size_t i = 0; i < cbs; i++ )
+                //     grad += diff(i) * g_phi.block(i, 0, 1, 2);
 
-                L2H1_error += dt * qp.weight() * grad.dot(grad);
+                // L2H1_error += qp.weight() * grad.dot(grad);
             }
+            // }
+
+            T test = 0;
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    for(size_t I = 0; I < cbs; I++)
+                        for(size_t J = 0; J < cbs; J++)
+                        {
+                            test += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * grad_matrix(I,J);
+                        }
+            if(test < 0)
+                cout << "test negatif : " << test << endl;
+            else
+                cout << "test positif : " << test << endl;
+            // pourquoi est-ce qu'on a des quantites < 0 ??
+            // verifier les matrices utilisees (sont-elles sym et >= 0 ??)
+            // -> a creuser ...
+            L2H1_error += test;
 
             cell_i++;
         }
