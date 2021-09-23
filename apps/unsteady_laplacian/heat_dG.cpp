@@ -23,11 +23,6 @@
  * DOI: 10.1016/j.cam.2017.09.017
  */
 
-/*
- * Attention : penser a changer le triangle des ponts pour le symbole de Sorbonne ...
- * + mettre mes coordonnees
- */
-
 /* this file deals with the heat equation with a discontinuous Galerkin method in time */
 #include <iostream>
 #include <regex>
