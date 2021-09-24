@@ -50,6 +50,21 @@ using namespace std;
 template<typename Mesh>
 struct rhs_functor;
 
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct rhs_functor< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    scalar_type operator()(const point_type& pt) const
+    {
+        return 0.0;
+    }
+};
+
+
 template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
 struct rhs_functor< Mesh<T, 2, Storage> >
 {
@@ -75,6 +90,30 @@ template<typename Mesh>
 struct solution_functor;
 
 template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct solution_functor< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    T omega;
+
+    solution_functor< Mesh<T, 1, Storage> >(const T omega_)
+        : omega(omega_)
+        {}
+
+    scalar_type operator()(T t, const point_type& pt) const
+    {
+        int K = 1;
+        // assert( N > omega );
+
+        // return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
+        return std::exp(-M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x());
+    }
+};
+
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
 struct solution_functor< Mesh<T, 2, Storage> >
 {
     typedef Mesh<T,2,Storage>               mesh_type;
@@ -87,17 +126,13 @@ struct solution_functor< Mesh<T, 2, Storage> >
         : omega(omega_)
         {}
 
-    scalar_type operator()(const point_type& pt) const
+    scalar_type operator()(T t, const point_type& pt) const
     {
-        int N = 3;
-        assert( N > omega );
-        // T coeff = omega / std::sqrt(2);
-        // auto cos_cx = std::cos(coeff * pt.x());
-        // auto cos_cy = std::cos(coeff * pt.y());
-        // return cos_cx * cos_cy;
-        T coeff = std::sqrt( N*N - omega*omega );
-        T sinh = 0.5 * ( std::exp(coeff * pt.y()) - std::exp(-coeff * pt.y()) );
-        return std::sin(N * pt.x()) * sinh / coeff;
+        int K = 1;
+        // assert( N > omega );
+
+        // return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
+        return std::exp(-2*M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
     }
 };
 
@@ -160,6 +195,30 @@ auto make_grad_function(const Mesh& msh, const typename Mesh::coordinate_type om
 template<typename Mesh>
 struct varpi_functor;
 
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct varpi_functor< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    scalar_type operator()(const point_type& pt) const
+    {
+        scalar_type ret;
+
+        bool Ndom1 = (pt.x() >= 0.25) && (pt.x() <= 0.75);
+        bool Ndom4 = !( (pt.x() >= 0.25) && (pt.x() <= 0.75) );
+        if( Ndom1 )
+            ret = 0.0;
+        else
+            ret = 1.0;
+
+        return ret;
+    }
+};
+
+
 template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
 struct varpi_functor< Mesh<T, 2, Storage> >
 {
@@ -171,11 +230,11 @@ struct varpi_functor< Mesh<T, 2, Storage> >
     {
         scalar_type ret;
 
-        // bool Ndom1 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
+        bool Ndom1 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
         // bool Ndom2 = (pt.y() >= 0.125) && (pt.y() <= 0.875);
         // bool Ndom3 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125);
         bool Ndom4 = !( (pt.x() >= 0.25) && (pt.x() <= 0.75) && (pt.y() <= 0.5) );
-        if( Ndom4 )
+        if( Ndom1 )
             ret = 0.0;
         else
             ret = 1.0;
@@ -195,6 +254,29 @@ auto make_varpi_function(const Mesh& msh)
 
 template<typename Mesh>
 struct B_functor;
+
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct B_functor< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    scalar_type operator()(const point_type& pt) const
+    {
+        scalar_type ret;
+
+        bool Ndom4 = false;
+        if( Ndom4 )
+            ret = 0.0;
+        else
+            ret = 1.0;
+
+        return ret;
+    }
+};
+
 
 template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
 struct B_functor< Mesh<T, 2, Storage> >
@@ -261,7 +343,7 @@ class heat_UC_assembler
     std::vector<size_t>     expand_table;
     hho_degree_info         di;
     size_t                  time_degree;
-    std::vector<Triplet<T>> triplets, triplets_MAT_RHS;
+    std::vector<Triplet<T>> triplets; //, triplets_MAT_RHS;
 
     size_t num_all_faces, num_dirichlet_faces, num_other_faces, num_cells, system_size, time_steps;
 
@@ -299,7 +381,7 @@ class heat_UC_assembler
     typedef dynamic_matrix<T> matrix_type;
     typedef dynamic_vector<T> vector_type;
 
-    SparseMatrix<T> LHS, MAT_RHS;
+    SparseMatrix<T> LHS; //, MAT_RHS;
     vector_type     RHS;
 
     heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps)
@@ -330,26 +412,23 @@ class heat_UC_assembler
         const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
         const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
         size_t space_system_size = fbs * (num_other_faces + num_all_faces) + 2 * cbs * msh.cells_size();
-        system_size = space_system_size * (time_degree + 1) * time_steps + cbs * (time_steps+1);
+        system_size = space_system_size * (time_degree + 1) * time_steps + cbs * (time_steps+1) * msh.cells_size();
 
         LHS = SparseMatrix<T>(system_size, system_size);
-        MAT_RHS = SparseMatrix<T>(system_size, system_size);
+        // MAT_RHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
         // RHS_F = vector_type::Zero(system_size);
     }
 
     // here the Dirichlet data are not taken into account
     // the rhs function is not time-dependent
-    template<typename Function, typename Function2>
+
     void
     assemble(const Mesh&                     msh,
              const typename Mesh::cell_type& cl,
              const size_t                    n_step,
              const matrix_type&              lhs,
-             const vector_type&              rhs,
-             const matrix_type&              mat_rhs,
-             const Function&                 dirichlet_bf,
-             const Function2&                init_fun)
+             const vector_type&              rhs)
     {
 	auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
 
@@ -429,7 +508,7 @@ class heat_UC_assembler
                 //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
             }
 
-            // RHS(asm_map[i]) += rhs_modif(i);
+            RHS(asm_map[i]) += rhs(i);
             // RHS_F(asm_map[i]) += rhs(i);
             // do we need this ??
         }
@@ -528,9 +607,9 @@ class heat_UC_assembler
     finalize(void)
     {
         LHS.setFromTriplets(triplets.begin(), triplets.end());
-        MAT_RHS.setFromTriplets(triplets_MAT_RHS.begin(), triplets_MAT_RHS.end());
+        // MAT_RHS.setFromTriplets(triplets_MAT_RHS.begin(), triplets_MAT_RHS.end());
         triplets.clear();
-        triplets_MAT_RHS.clear();
+        // triplets_MAT_RHS.clear();
     }
 
     size_t
@@ -707,6 +786,9 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 }
 
 ///////////////////////////////////////////////
+/*
+ * TODO : add gnuplot outputs for 1D and 2D
+ */
 
 template<typename Mesh>
 bool
@@ -736,7 +818,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     auto rhs_fun = make_rhs_function(msh);
     auto sol_fun = make_solution_function(msh,omega);
-    auto sol_grad = make_grad_function(msh,omega);
+    // auto sol_grad = make_grad_function(msh,omega);
 
     auto varpi_fun = make_varpi_function(msh);
     auto B_fun = make_B_function(msh);
@@ -803,6 +885,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     tc.tic();
 
+    cout << "start assembly" << endl;
     for (auto& cl : msh)
     {
         auto fcs    = faces(msh, cl);
@@ -815,7 +898,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         auto mass   = make_mass_matrix(msh, cl, cb);
         // Matrix<scalar_type, Dynamic, Dynamic> ah = gr.second + stab;
 
-        Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(ah.cols()*(time_degree+1), ah.cols()*(time_degree+1));
+        size_t loc_size = 2*ah.cols()*(time_degree+1) + 2*cbs;
+        Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
 
         /* Primal - Primal */
         Matrix<T, Dynamic, Dynamic> PP = stab;
@@ -823,6 +907,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         // add data assimilation term
         if( varpi_fun(barycenter(msh,cl)) > 0.5 )
         {
+            // cout << "enter cell with data" << "..." << endl;
             PP.block(0,0,cbs,cbs) += mass;
 
             // TODO : add rhs
@@ -994,139 +1079,188 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
 
         // at this point all the lhs terms have been implemented
-        // -> go on from here
 
-        Matrix<scalar_type, Dynamic, Dynamic> mat_rhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(ah.cols()*(time_degree+1), ah.cols()*(time_degree+1));
-        // jump term (cell - cell only)
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                mat_rhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc_bis(l1,l2);
+        // Matrix<scalar_type, Dynamic, Dynamic> mat_rhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(ah.cols()*(time_degree+1), ah.cols()*(time_degree+1));
+        // // jump term (cell - cell only)
+        // for(size_t l1 = 0; l1 <= time_degree; l1++)
+        //     for(size_t l2 = 0; l2 <= time_degree; l2++)
+        //         mat_rhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc_bis(l1,l2);
 
-        // the rhs is computed for constant functions
+        // the rhs is computed for constant functions (in time)
         Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
         auto space_rhs = make_rhs(msh, cl, cb, rhs_fun, 1);
+        // TODO : check this vector ...
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             rhs.block(l1*cbs, 0, cbs, 1) = space_rhs * time_mass(l1,0);
 
-        // add a loop on all the time steps ???
+        // loop on the time steps
+        for(int step_i = 0; step_i < time_steps; step_i++) {
+            // compute RHS -> TODO
+            // compute data
+            if( varpi_fun(barycenter(msh,cl)) > 0.5 ) {
+                // compute (u , w_T)_{I_n x T}
+                Matrix<scalar_type, Dynamic, 1> data_rhs
+                    = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
+                const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+                auto t_cell = *(time_mesh.cells_begin()+step_i);
+                auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
+                const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
+                for(auto& qpt : qpst)
+                {
+                    auto t_phi   = t_cb.eval_functions( qpt.point() );
+                    T time_point = qpt.point().x();
 
-        // assembler.assemble(msh, cl, lhs, rhs, mat_rhs, bcs_fun, init_fun);
+                    for(auto& qp : qps)
+                    {
+                        auto x_phi   = cb.eval_functions( qp.point() );
+                        for(size_t l1 = 0; l1 <= time_degree; l1++)
+                        {
+                            data_rhs.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * sol_fun( time_point, qp.point() ) * x_phi;
+                        }
+                    }
+                }
+                
+                rhs.block(0, 0, cbs*(time_degree+1), 1) = data_rhs;
+            }
+
+            assembler.assemble(msh, cl, step_i, lhs, rhs);
+        }
+
+
     }
     cout << "end assembly loop" << endl;
 
-    // assembler.finalize();
+    cout << "LHS.rows() = " << assembler.LHS.rows() << "  "
+         << "LHS.cols() = " << assembler.LHS.cols() << endl;
+    cout << "2xcbsx(l+1)xNcxNt + (Nf+Nfi)xfbsx(l+1)xNt + cbsxNcx(Nt+1) = "
+         << 2*cbs*(time_degree+1)*num_cells*time_steps + (assembler.num_assembled_faces() + num_faces) * fbs * (time_degree+1) * time_steps + cbs * num_cells * (time_steps+1) << endl;
 
-    // auto LHS = assembler.LHS;
+    assembler.finalize();
+
+    auto LHS = assembler.LHS;
     // auto MAT_RHS = assembler.MAT_RHS;
-    // auto RHS = assembler.RHS;
+    auto RHS = assembler.RHS;
     // auto RHS_F = assembler.RHS_F;
 
-    // cout << "LHS.rows() = " << LHS.rows() << endl;
+    cout << "LHS.rows() = " << LHS.rows() << endl;
 
-    // tc.toc();
-    // std::cout << " Assembly time: " << tc << std::endl;    
+    tc.toc();
+    std::cout << " Assembly time: " << tc << std::endl;
 
+    /* Solving linear system */
+    cout << "RHS.norm() = " << RHS.norm() << endl;
+    tc.tic();
+    Matrix<scalar_type, Dynamic, 1> u;
+    disk::solvers::pardiso_params<scalar_type> pparams;
+    mkl_pardiso(pparams, LHS, RHS, u);
+    tc.toc();
+    
+    std::cout << " Solving time: " << tc << std::endl;
 
-    // Matrix<scalar_type, Dynamic, 1> u;
-    // scalar_type t = 0.0;
+    cout << "u.norm() = " << u.norm() << endl;
+    
+    scalar_type t = 0.0;
     // scalar_type dt = final_time/time_steps;
-    // scalar_type L2H1_error = 0.;
+    scalar_type L2H1_error = 0.;
 
-    // size_t freq_exp = 300;
+    size_t freq_exp = 1;
 
-    // // time loop
-    // for(size_t step_i = 0; step_i<time_steps; step_i++)
-    // {
-    //     if(step_i % freq_exp == 0)
-    //         std::cout << "Step " << step_i << std::endl;
-    //     disk::solvers::pardiso_params<scalar_type> pparams;
-    //     mkl_pardiso(pparams, LHS, RHS, u);
+    /* Post-processing */
+    // time loop
+    for(size_t step_i = 0; step_i<time_steps; step_i++)
+    {
+        if(step_i % freq_exp == 0)
+            std::cout << "Step " << step_i << std::endl;
 
-    //     Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+        Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
 
-    //     if(step_i % freq_exp == 0)
-    //     {
-    //         for (size_t i = 0; i < msh.cells_size(); i++)
-    //             sol_silo(i) = u(i*cbs*(time_degree+1));
-    //         export_to_silo( msh, sol_silo, step_i );
-    //     }
+#if false
+        if(step_i % freq_exp == 0)
+        {
+            // be careful : this exports a very approximated solution
+            // TODO : modify this export ...
+            for (size_t i = 0; i < msh.cells_size(); i++)
+                sol_silo(i) = u(i*cbs*(time_degree+1)*time_steps + cbs*(time_degree+1) * step_i);
+            export_to_silo( msh, sol_silo, step_i );
+        }
+#endif
 
-    //     auto t_cell = *(time_mesh.cells_begin()+step_i);
-    //     auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
-    //     const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
+        auto t_cell = *(time_mesh.cells_begin()+step_i);
+        auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
+        const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
 
-    //     // update RHS with the previous solution
-    //     RHS = RHS_F + MAT_RHS * u;
-    //     size_t cell_i = 0;
-    //     for (auto& cl : msh)
-    //     {
-    //         auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
+        //     // update RHS with the previous solution
+        //     RHS = RHS_F + MAT_RHS * u;
+        size_t cell_i = 0;
+        for (auto& cl : msh)
+        {
+            auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
 
-    //         /* compute the L2 projection in space and time */
-    //         Matrix<scalar_type, Dynamic, 1> rhs_proj
-    //             = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
-    //         const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
-    //         for(auto& qpt : qpst)
-    //         {
-    //             auto t_phi   = t_cb.eval_functions( qpt.point() );
-    //             T time_point = qpt.point().x();
+            /* compute the L2 projection in space and time */
+            Matrix<scalar_type, Dynamic, 1> rhs_proj
+                = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
+            const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+            for(auto& qpt : qpst)
+            {
+                auto t_phi   = t_cb.eval_functions( qpt.point() );
+                T time_point = qpt.point().x();
 
-    //             for(auto& qp : qps)
-    //             {
-    //                 auto x_phi   = cb.eval_functions( qp.point() );
-    //                 for(size_t l1 = 0; l1 <= time_degree; l1++)
-    //                 {
-    //                     rhs_proj.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * solution( time_point, qp.point() ) * x_phi;
-    //                 }
-    //             }
-    //         }
+                for(auto& qp : qps)
+                {
+                    auto x_phi   = cb.eval_functions( qp.point() );
+                    for(size_t l1 = 0; l1 <= time_degree; l1++)
+                    {
+                        rhs_proj.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * sol_fun( time_point, qp.point() ) * x_phi;
+                    }
+                }
+            }
 
-    //         // use the mass matrix to compute the coordinates of the projection
-    //         auto cell_mass   = make_mass_matrix(msh, cl, cb);
-    //         Matrix<scalar_type, Dynamic, Dynamic> mass_matrix
-    //             = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs*(time_degree+1) , cbs*(time_degree+1));
-    //         for(size_t l1 = 0; l1 <= time_degree; l1++)
-    //         {
-    //             for(size_t l2 = 0; l2 <= time_degree; l2++)
-    //             {
-    //                 mass_matrix.block(l1*cbs, l2*cbs, cbs, cbs) = time_mass(l1,l2) * cell_mass;
-    //             }
-    //         }
-    //         Matrix<scalar_type, Dynamic, 1> proj
-    //             = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
-    //         LLT< Matrix<scalar_type, Dynamic, Dynamic> > mat_llt;
-    //         mat_llt.compute(mass_matrix);
-    //         proj = mat_llt.solve(rhs_proj);
-
-
-    //         /* compute L2-H1-error of the current time step */
-    //         Matrix<scalar_type, Dynamic, 1> diff
-    //             = u.block(cell_i*cbs*(time_degree+1), 0, cbs*(time_degree+1), 1) - proj;
-
-    //         Matrix<scalar_type, Dynamic, Dynamic> grad_matrix
-    //             = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs , cbs);
-    //         for(auto& qp : qps)
-    //         {
-    //             const auto g_phi = cb.eval_gradients( qp.point() );
-    //             grad_matrix += qp.weight() * g_phi * g_phi.transpose();
-    //         }
+            // use the mass matrix to compute the coordinates of the projection
+            auto cell_mass   = make_mass_matrix(msh, cl, cb);
+            Matrix<scalar_type, Dynamic, Dynamic> mass_matrix
+                = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs*(time_degree+1) , cbs*(time_degree+1));
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+            {
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                {
+                    mass_matrix.block(l1*cbs, l2*cbs, cbs, cbs) = time_mass(l1,l2) * cell_mass;
+                }
+            }
+            Matrix<scalar_type, Dynamic, 1> proj
+                = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
+            LLT< Matrix<scalar_type, Dynamic, Dynamic> > mat_llt;
+            mat_llt.compute(mass_matrix);
+            proj = mat_llt.solve(rhs_proj);
 
 
-    //         for(size_t l1 = 0; l1 <= time_degree; l1++)
-    //             for(size_t l2 = 0; l2 <= time_degree; l2++)
-    //                 for(size_t I = 0; I < cbs; I++)
-    //                     for(size_t J = 0; J < cbs; J++)
-    //                     {
-    //                         L2H1_error += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * grad_matrix(I,J);
-    //                     }
+            /* compute L2-H1-error of the current time step */
+            Matrix<scalar_type, Dynamic, 1> diff
+                = u.block(cell_i*cbs*(time_degree+1)*time_steps + cbs * (time_degree+1) * step_i, 0, cbs*(time_degree+1), 1) - proj;
 
-    //         cell_i++;
-    //     }
-    //     t += dt;
-    // } // time loop
+            Matrix<scalar_type, Dynamic, Dynamic> grad_matrix
+                = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs , cbs);
+            for(auto& qp : qps)
+            {
+                const auto g_phi = cb.eval_gradients( qp.point() );
+                grad_matrix += qp.weight() * g_phi * g_phi.transpose();
+            }
 
-    // cout << "final time = " << t << endl;
-    // std::cout << "L2-H1-error = " << std::sqrt(L2H1_error) << std::endl;
+
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    for(size_t I = 0; I < cbs; I++)
+                        for(size_t J = 0; J < cbs; J++)
+                        {
+                            L2H1_error += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * grad_matrix(I,J);
+                        }
+
+            cell_i++;
+        }
+        t += dt;
+    } // time loop
+
+    cout << "final time = " << t << endl;
+    std::cout << "L2-H1-error = " << std::sqrt(L2H1_error) << std::endl;
 
     return true;
 }
@@ -1139,14 +1273,15 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 int main(int argc, char **argv)
 {
     using T = double;
-    disk::cartesian_mesh<T, 2> msh;
+    // disk::cartesian_mesh<T, 2> msh;
 
     size_t      degree = 1;
     size_t      time_degree = 0;
     size_t      N = 8;
     char *      mesh_filename = nullptr;
+    size_t      num_elems = 16; // for 1D only
     int ch;
-    while ( (ch = getopt(argc, argv, "k:m:N:l:")) != -1 )
+    while ( (ch = getopt(argc, argv, "k:m:N:M:l:")) != -1 )
     {
 	switch(ch)
         {
@@ -1162,6 +1297,10 @@ int main(int argc, char **argv)
                 N = std::stoi(optarg);
                 break;
 
+            case 'M':
+                num_elems = std::stoi(optarg);
+                break;
+
             case 'l':
                 time_degree = std::stoi(optarg);
                 break;
@@ -1172,9 +1311,28 @@ int main(int argc, char **argv)
 	}
     }
 
-    msh = load_cartesian_2d_mesh<T>(mesh_filename);
+    // msh = load_cartesian_2d_mesh<T>(mesh_filename);
 
-    std::cout << "Mesh loaded ..." << std::endl;
+
+    if (mesh_filename == nullptr)
+    {
+        std::cout << "Mesh format: 1D uniform" << std::endl;
+
+        typedef disk::generic_mesh<T, 1>  mesh_type;
+
+        mesh_type msh;
+        disk::uniform_mesh_loader<T, 1> loader(0, 1, num_elems);
+        loader.populate_mesh(msh);
+        std::cout << "1D Mesh loaded ..." << std::endl;
+
+        UC_heat_solver(msh, degree, N, time_degree);
+
+        return 0;
+    }
+
+    auto msh = disk::load_fvca5_2d_mesh<T>(mesh_filename);
+    std::cout << "2D Mesh loaded ..." << std::endl;
     UC_heat_solver(msh, degree, N, time_degree);
+    return 0;
 }
 
