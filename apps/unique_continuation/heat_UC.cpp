@@ -107,7 +107,7 @@ struct solution_functor< Mesh<T, 1, Storage> >
         int K = 1;
         // assert( N > omega );
 
-        // return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
+        // return std::sin(M_PI*K*pt.x());
         return std::exp(-M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x());
     }
 };
@@ -630,17 +630,68 @@ make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_
 
 //////////////////////////////////////////////////////
 
+template<template<typename, size_t, typename> class Mesh,
+         typename T, typename Storage>
+void
+export_to_silo(const Mesh<T, 1, Storage>& msh,
+               const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
+               const Matrix<T, Dynamic, 1>& B, int cycle = -1)
+{
+    std::stringstream ss_data, ss_varpi, ss_B;
+    ss_varpi << "varpi.txt";
+    ss_B << "B.txt";
+    if(cycle == -1)
+    {
+        ss_data << "sol.txt";
+    }
+    else
+    {
+        ss_data << "out_data_" << cycle << ".txt";
+    }
+
+
+    std::ofstream data_file(ss_data.str(), std::ios::out | std::ios::trunc);
+    if(!data_file)
+        std::cerr << "error opening file !!" << std::endl;
+
+    std::ofstream varpi_file(ss_varpi.str(), std::ios::out | std::ios::trunc);
+    if(!varpi_file)
+        std::cerr << "error opening file !!" << std::endl;
+
+    std::ofstream B_file(ss_B.str(), std::ios::out | std::ios::trunc);
+    if(!B_file)
+        std::cerr << "error opening file !!" << std::endl;
+
+
+    int cell_i = 0;
+    for(auto& cl : msh)
+    {
+        auto x = barycenter(msh, cl).x();
+
+        data_file << x << "  " << data[cell_i] << std::endl;
+        varpi_file << x << "  " << varpi[cell_i] << std::endl;
+        B_file << x << "  " << B[cell_i] << std::endl;
+        cell_i++;
+    }
+
+    data_file.close();
+    varpi_file.close();
+    B_file.close();
+}
+
+/////////////////////////
 
 template<template<typename, size_t, typename> class Mesh,
          typename T, typename Storage>
 void
 export_to_silo(const Mesh<T, 2, Storage>& msh,
-               const Matrix<T, Dynamic, 1>& data, int cycle = -1)
+               const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
+               const Matrix<T, Dynamic, 1>& B, int cycle = -1)
 {
     disk::silo_database silo;
 
     if (cycle == -1)
-        silo.create("heat.silo");
+        silo.create("UC_heat.silo");
     else
     {
         std::stringstream ss;
@@ -651,6 +702,8 @@ export_to_silo(const Mesh<T, 2, Storage>& msh,
     silo.add_mesh(msh, "mesh");
 
     silo.add_variable("mesh", "sol", data, disk::zonal_variable_t );
+    silo.add_variable("mesh", "varpi", varpi, disk::zonal_variable_t );
+    silo.add_variable("mesh", "B", B, disk::zonal_variable_t );
     silo.close();
 }
 
@@ -1173,17 +1226,26 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             std::cout << "Step " << step_i << std::endl;
 
         Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+        Matrix<scalar_type, Dynamic, 1> data_varpi = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+        Matrix<scalar_type, Dynamic, 1> data_B = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
 
-#if false
         if(step_i % freq_exp == 0)
         {
             // be careful : this exports a very approximated solution
             // TODO : modify this export ...
             for (size_t i = 0; i < msh.cells_size(); i++)
                 sol_silo(i) = u(i*cbs*(time_degree+1)*time_steps + cbs*(time_degree+1) * step_i);
-            export_to_silo( msh, sol_silo, step_i );
+
+            int cell_i = 0;
+            for(auto& cl : msh)
+            {
+                const auto& bar = barycenter(msh,cl);
+                data_varpi(cell_i) = varpi_fun( bar );
+                data_B(cell_i) = varpi_fun( bar );
+                cell_i++;
+            }
+            export_to_silo( msh, sol_silo, data_varpi, data_B, step_i );
         }
-#endif
 
         auto t_cell = *(time_mesh.cells_begin()+step_i);
         auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
@@ -1267,6 +1329,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
 /* run main with :
    ./heat_dG -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
+   ./heat_dG -M 8 -k 1 -N 8 -l 0
 */
 
 
