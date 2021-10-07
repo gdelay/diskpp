@@ -677,6 +677,40 @@ export_to_silo(const Mesh<T, 1, Storage>& msh,
     data_file.close();
     varpi_file.close();
     B_file.close();
+
+
+
+    //// For tests with the exact sol (modif N)
+    std::stringstream ss_ex_sol;
+    if(cycle == -1)
+    {
+        ss_ex_sol << "ex_sol.txt";
+    }
+    else
+    {
+        ss_ex_sol << "ex_sol_" << cycle << ".txt";
+    }
+
+
+    std::ofstream ex_sol_file(ss_ex_sol.str(), std::ios::out | std::ios::trunc);
+    if(!ex_sol_file)
+        std::cerr << "error opening file !!" << std::endl;
+
+    auto sol_fun = make_solution_function(msh,0);
+
+    int N = 32;
+    double t = (2./N) * (cycle+0.5);
+
+    cell_i = 0;
+    for(auto& cl : msh) {
+        auto x = barycenter(msh, cl).x();
+        auto sol = sol_fun(t , barycenter(msh, cl));
+
+        ex_sol_file << x << "  " << sol << std::endl;
+        cell_i++;
+    }
+
+    ex_sol_file.close();
 }
 
 /////////////////////////
@@ -929,7 +963,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         if(hT > h_max) h_max = hT;
     }
 
-    T gamma = 1.0;  // Tikhonov coefficient
+    T gamma = 1.e-3;  // Tikhonov coefficient
     T dtl = 1., hk = 1.;
     for(int l = 0; l< time_degree; l++) dtl *= dt;
     for(int k=0; k < hdi.cell_degree(); k++) hk *= h_max;
@@ -992,8 +1026,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                                   cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs,
                                   fbs, fbs) = PP.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs*num_faces) * time_mass(l1,l2);
 
+
         /* Primal - Dual */
         size_t dual_offset = (cbs + num_faces * fbs) * (time_degree+1);
+
         // diffusion term
         // cell - cell
         for(size_t l1 = 0; l1 <= time_degree; l1++)
@@ -1019,7 +1055,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 for(size_t face_i = 0; face_i < num_faces; face_i++)
 		    for(size_t face_j = 0; face_j < num_faces; face_j++)
                         lhs.block(cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs, dual_offset + cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs, fbs, fbs)
-                            = ah.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs*num_faces) * time_mass(l1,l2);
+                            = ah.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
 
         // derivative terms
@@ -1042,11 +1078,12 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
         /* Dual - Primal */
         // obtained by symmetry
-        lhs.block(dual_offset, 0, cbs*(time_degree+1), cbs*(time_degree+1))
-            = lhs.block(0, dual_offset, cbs*(time_degree+1), cbs*(time_degree+1)).transpose();
+        lhs.block(dual_offset, 0, dual_offset, dual_offset)
+            = lhs.block(0, dual_offset, dual_offset, dual_offset).transpose();
 
         lhs.block(dual_offset, tertial_offset, cbs*(time_degree+1), cbs)
             = lhs.block(tertial_offset, dual_offset, cbs, cbs*(time_degree+1)).transpose();
+
 
 
         /* Dual - Dual */
@@ -1085,7 +1122,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 for(size_t face_i = 0; face_i < num_faces; face_i++)
 		    for(size_t face_j = 0; face_j < num_faces; face_j++)
                         lhs.block(dual_offset + cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs, dual_offset + cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs, fbs, fbs)
-                            -= sigma.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs*num_faces) * time_mass(l1,l2);
+                            -= sigma.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
         /* Jump penalization - previous interface */
         // primal - primal
@@ -1328,8 +1365,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 }
 
 /* run main with :
-   ./heat_dG -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
-   ./heat_dG -M 8 -k 1 -N 8 -l 0
+   ./heat_UC -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
+   ./heat_UC -M 8 -k 1 -N 8 -l 0
 */
 
 
