@@ -61,6 +61,7 @@ struct rhs_functor< Mesh<T, 1, Storage> >
     scalar_type operator()(const point_type& pt) const
     {
         return 0.0;
+        // return M_PI*M_PI*std::sin( M_PI * pt.x() );
     }
 };
 
@@ -209,11 +210,12 @@ struct varpi_functor< Mesh<T, 1, Storage> >
 
         bool Ndom1 = (pt.x() >= 0.25) && (pt.x() <= 0.75);
         bool Ndom4 = !( (pt.x() >= 0.25) && (pt.x() <= 0.75) );
-        if( Ndom1 )
+        if( Ndom4 )
             ret = 0.0;
         else
             ret = 1.0;
 
+        // return 1.;
         return ret;
     }
 };
@@ -951,7 +953,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     {
         auto phi_prev   = time_cb.eval_functions( qp.point() );
         auto phi_next   = time_cb_next.eval_functions( qp.point() );
-        time_loc_bis += qp.weight() * phi_next * phi_next.transpose();
+        time_loc_bis += qp.weight() * phi_prev * phi_prev.transpose();
     }
 
     // min and max h_T
@@ -1064,16 +1066,16 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         // (xi_T , d_t w_T)_{I_n x T}
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
-                lhs.block(l1*cbs, dual_offset + l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_deriv(l2,l1); // reversed l2 / l1 since derivative is on the test function
+                lhs.block(l1*cbs, dual_offset + l2*cbs, cbs, cbs) += mass * time_deriv(l2,l1); // reversed l2 / l1 since the derivative is on the test function
 
         // (w_T(t_{n-1}^+) , xi_T(t_{n-1}^+) )_{Omega}
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
-                lhs.block(l1*cbs, dual_offset + l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc(l1,l2);
+                lhs.block(l1*cbs, dual_offset + l2*cbs, cbs, cbs) += mass * time_loc(l1,l2);
 
         // - (z^{n-1} , xi_T(t_{n-1}^+))_{Omega}
         for(size_t l2 = 0; l2 <= time_degree; l2++)
-            lhs.block(tertial_offset, dual_offset + l2*cbs, cbs, cbs) -= mass.block(0, 0, cbs, cbs) * time_loc(0,l2);
+            lhs.block(tertial_offset, dual_offset + l2*cbs, cbs, cbs) -= mass * time_loc(0,l2);
 
 
         /* Dual - Primal */
@@ -1181,7 +1183,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         auto space_rhs = make_rhs(msh, cl, cb, rhs_fun, 1);
         // TODO : check this vector ...
         for(size_t l1 = 0; l1 <= time_degree; l1++)
-            rhs.block(l1*cbs, 0, cbs, 1) = space_rhs * time_mass(l1,0);
+            rhs.block(dual_offset + l1*cbs, 0, cbs, 1) = space_rhs * time_mass(l1,0);
 
         // loop on the time steps
         for(int step_i = 0; step_i < time_steps; step_i++) {
