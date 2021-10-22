@@ -269,11 +269,12 @@ struct B_functor< Mesh<T, 1, Storage> >
     {
         scalar_type ret;
 
-        bool Ndom4 = false;
+        // bool Ndom4 = true;
+        bool Ndom4 = (pt.x() >= 0.25) && (pt.x() <= 0.75);
         if( Ndom4 )
-            ret = 0.0;
-        else
             ret = 1.0;
+        else
+            ret = 0.0;
 
         return ret;
     }
@@ -317,20 +318,22 @@ auto make_B_function(const Mesh& msh)
 template<typename T>
 class test_info {
 public:
-    test_info()
-        {
-            H1_Om = 0.0;
-            L2_Om = 0.0;
-            H1_B = 0.0;
-            L2_B = 0.0;
-            H1_z = 0.0;
-        }
+    test_info() : H1_Om(0.) , L2_Om(0.) , H1_B(0.) , L2_B(0.) , H1_z(0.) {}
     T H1_Om; // H1-error in Omega
     T L2_Om; // L2-error in Omega
     T H1_B; // H1-error in B
     T L2_B; // L2-error in B
     T H1_z; // H1-error for the dual variable
 };
+
+// B function for the time domain
+template<typename T>
+bool time_B(T time) {
+    T eps = 0.1;
+    T fin_time = 2.;
+
+    return ( eps < time ) && ( time < fin_time - eps );
+}
 
 ////////////////////////////////////////////////////////////////////////////
 ////////////////////////   ASSEMBLERS  /////////////////////////////////////
@@ -905,9 +908,6 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 }
 
 ///////////////////////////////////////////////
-/*
- * TODO : add gnuplot outputs for 1D and 2D
- */
 
 template<typename Mesh>
 bool
@@ -1284,6 +1284,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     scalar_type t = 0.0;
     // scalar_type dt = final_time/time_steps;
     scalar_type L2H1_error = 0.;
+    scalar_type L2L2_error = 0.;
+    scalar_type L2H1_B_error = 0.;
+    scalar_type L2L2_B_error = 0.;
+    scalar_type L2H1_z = 0.;
 
     size_t freq_exp = 1;
 
@@ -1320,8 +1324,6 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
         const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
 
-        //     // update RHS with the previous solution
-        //     RHS = RHS_F + MAT_RHS * u;
         size_t cell_i = 0;
         for (auto& cl : msh)
         {
@@ -1363,6 +1365,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             mat_llt.compute(mass_matrix);
             proj = mat_llt.solve(rhs_proj);
 
+            /******** compute errors ********/
 
             /* compute L2-H1-error of the current time step */
             Matrix<scalar_type, Dynamic, 1> diff
@@ -1376,6 +1379,13 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 grad_matrix += qp.weight() * g_phi * g_phi.transpose();
             }
 
+            const auto& bar = barycenter(msh,cl);
+            // coordinates of the dual sol (cell components)
+            // !!!! memory error here !!!!
+            // Matrix<scalar_type, Dynamic, 1> dual_sol
+            //     = assembler.take_local_solution(msh, cl, step_i, u, sol_fun).block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
+
+            Matrix<scalar_type, Dynamic, 1> dual_sol = Matrix<scalar_type, Dynamic, 1>::Zero(cbs*(time_degree+1));
 
             for(size_t l1 = 0; l1 <= time_degree; l1++)
                 for(size_t l2 = 0; l2 <= time_degree; l2++)
@@ -1383,6 +1393,14 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                         for(size_t J = 0; J < cbs; J++)
                         {
                             L2H1_error += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * grad_matrix(I,J);
+                            L2L2_error += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * cell_mass(I,J);
+                            if(time_B(t) && (B_fun(bar) > 0.5) )
+                            {
+                                L2H1_B_error += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * grad_matrix(I,J);
+                                L2L2_B_error += diff(l1 * cbs + I) * diff(l2 * cbs + J) * time_mass(l1,l2) * cell_mass(I,J);
+                            }
+                            // L2H1-norm of the dual variable
+                            L2H1_z += dual_sol(l1*cbs+I) * dual_sol(l2*cbs+J)* time_mass(l1,l2) * grad_matrix(I,J);
                         }
 
             cell_i++;
@@ -1392,6 +1410,17 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     cout << "final time = " << t << endl;
     std::cout << "L2-H1-error = " << std::sqrt(L2H1_error) << std::endl;
+    std::cout << "L2-L2-error = " << std::sqrt(L2L2_error) << std::endl;
+    std::cout << "L2-H1-B-error = " << std::sqrt(L2H1_B_error) << std::endl;
+    std::cout << "L2-L2-B-error = " << std::sqrt(L2L2_B_error) << std::endl;
+    std::cout << "L2-H1-z-norm = " << std::sqrt(L2H1_z) << std::endl;
+
+    test_info<double> TI;
+    TI.H1_Om = std::sqrt(L2H1_error);
+    TI.L2_Om = std::sqrt(L2L2_error);
+    TI.H1_B = std::sqrt(L2H1_B_error);
+    TI.L2_B = std::sqrt(L2L2_B_error);
+    TI.H1_z = std::sqrt(L2H1_z);
 
     return true;
 }
