@@ -346,6 +346,7 @@ class heat_UC_assembler
     hho_degree_info         di;
     size_t                  time_degree;
     std::vector<Triplet<T>> triplets; //, triplets_MAT_RHS;
+    bool                    BC_known;
 
     size_t num_all_faces, num_dirichlet_faces, num_other_faces, num_cells, system_size, time_steps;
 
@@ -386,8 +387,9 @@ class heat_UC_assembler
     SparseMatrix<T> LHS; //, MAT_RHS;
     vector_type     RHS;
 
-    heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps)
-	: di(hdi), time_degree(t_degree), time_steps(t_steps)
+    // BC_known : true if we know the Dirichlet values of the solution, false otherwise
+    heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
+	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(BC_known)
     {
 	auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
 
@@ -413,7 +415,10 @@ class heat_UC_assembler
 
         const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
         const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
-        size_t space_system_size = fbs * (num_other_faces + num_all_faces) + 2 * cbs * msh.cells_size();
+        size_t sol_faces = num_all_faces;
+        if(BC_known) sol_faces = num_other_faces;
+
+        size_t space_system_size = fbs * (num_other_faces + sol_faces) + 2 * cbs * msh.cells_size();
         system_size = space_system_size * (time_degree + 1) * time_steps + cbs * (time_steps+1) * msh.cells_size();
 
         LHS = SparseMatrix<T>(system_size, system_size);
@@ -449,19 +454,36 @@ class heat_UC_assembler
         for(size_t i = 0; i < cbs*(time_degree+1); i++)
             asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
 
-        // then face components of the primal variable (no Dirichlet BC)
+        // then face components of the primal variable
         for (size_t face_i = 0; face_i < fcs.size(); face_i++)
         {
             const auto face_offset     = fcs_id[face_i]; // offset(msh, fc);
-            const auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps
-                + face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
+            auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps;
+            if(BC_known)
+                face_LHS_offset += compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // compress table
+            else
+                face_LHS_offset += face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
 
-            for (size_t i = 0; i < fbs*(time_degree+1); i++)
-                asm_map.push_back(assembly_index(face_LHS_offset + i, true)); // no test on Dirichlet
+            if(BC_known)
+            {
+                const auto fc = fcs[face_i];
+                const bool dirichlet = is_dirichlet(fc);
+
+                for (size_t i = 0; i < fbs*(time_degree+1); i++)
+                    asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
+            }
+            else
+            {
+                for (size_t i = 0; i < fbs*(time_degree+1); i++)
+                    asm_map.push_back(assembly_index(face_LHS_offset + i, true)); // no test on Dirichlet (no BC)
+            }
         }
 
         // then cell components of the dual variable
-        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_all_faces * fbs * (time_degree+1) * time_steps;
+        size_t num_sol_faces = num_all_faces;
+        if( BC_known ) num_sol_faces = num_other_faces;
+
+        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
         for(size_t i = 0; i < cbs*(time_degree+1); i++)
             asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
 
@@ -480,7 +502,7 @@ class heat_UC_assembler
         }
 
         // then time-interface variable
-        size_t tertial_offset = 2 * num_cells * cbs * (time_degree+1) * time_steps + (num_all_faces + num_other_faces) * fbs * (time_degree+1) * time_steps;
+        size_t tertial_offset = 2 * num_cells * cbs * (time_degree+1) * time_steps + (num_sol_faces + num_other_faces) * fbs * (time_degree+1) * time_steps;
         for(int i=0; i<2*cbs; i++)
             asm_map.push_back(assembly_index(tertial_offset + cell_offset * cbs * (time_steps+1) + cbs * n_step + i, true));
 
@@ -491,7 +513,6 @@ class heat_UC_assembler
         // u0.block(0,0,cbs,1) = project_function(msh, cl, di.cell_degree(), init_fun, di.cell_degree());
         // auto rhs_modif = mat_rhs * u0 + rhs;
 
-        // complete from here ...
         for (size_t i = 0; i < lhs.rows(); i++)
         {
             if (!asm_map[i].assemble())
@@ -538,14 +559,11 @@ class heat_UC_assembler
             = solution.block(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
 
 
-        // primal variable : face components (no BC)
+        // primal variable : face components
         for (size_t face_i = 0; face_i < num_faces; face_i++)
         {
             const auto fc = fcs[face_i];
 
-            // auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
-
-            // const bool dirichlet = is_dirichlet(fc);
 
             // Dirichlet data not taken into account
             // if (dirichlet)
@@ -556,15 +574,27 @@ class heat_UC_assembler
             // }
 
             const auto face_offset     = offset(msh, fc);
-            const auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps
-                + face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
+            auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps;
+            if(BC_known) face_LHS_offset += compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // compress table
+            else face_LHS_offset += face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
 
-            ret.block(cbs * (time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
-                = solution.block(face_LHS_offset, 0, fbs * (time_degree+1), 1);
+
+            auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
+
+            const bool dirichlet = is_dirichlet(fc);
+
+            if(BC_known && dirichlet)
+                ret.block(cbs * (time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
+                    = vector_type::Zero((time_degree+1) * fbs);
+            else
+                ret.block(cbs * (time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
+                    = solution.block(face_LHS_offset, 0, fbs * (time_degree+1), 1);
         }
 
         // dual variable : cell components
-        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_all_faces * fbs * (time_degree+1) * time_steps;
+        size_t num_sol_faces = num_all_faces;
+        if(BC_known) num_sol_faces = num_other_faces;
+        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
         ret.block((cbs + num_faces*fbs)*(time_degree+1), 0, (time_degree+1)*cbs, 1)
             = solution.block(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
 
@@ -598,7 +628,7 @@ class heat_UC_assembler
         }
 
         // tertial variable
-        size_t tertial_offset = 2 * num_cells * cbs * (time_degree+1) * time_steps + (num_all_faces + num_other_faces) * fbs * (time_degree+1) * time_steps;
+        size_t tertial_offset = 2 * num_cells * cbs * (time_degree+1) * time_steps + (num_sol_faces + num_other_faces) * fbs * (time_degree+1) * time_steps;
         ret.block(2*(cbs + num_faces*fbs)*(time_degree+1), 0, 2*cbs, 1)
             = solution.block(tertial_offset + cell_offset * cbs * (time_steps+1) + cbs * n_step, 0, 2*cbs, 1);
 
@@ -625,9 +655,9 @@ class heat_UC_assembler
 
 template<typename Mesh>
 auto
-make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps)
+make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps, bool BC_known = false)
 {
-    return heat_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps);
+    return heat_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps, BC_known);
 }
 
 //////////////////////////////////////////////////////
@@ -893,7 +923,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto num_faces = msh.faces_size();
 
     // auto assembler = make_heat_dG_assembler(msh, hdi, time_degree);
-    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps);
+    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, true);
 
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
     auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
