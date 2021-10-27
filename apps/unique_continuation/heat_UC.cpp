@@ -58,10 +58,11 @@ struct rhs_functor< Mesh<T, 1, Storage> >
     typedef typename mesh_type::coordinate_type scalar_type;
     typedef typename mesh_type::point_type  point_type;
 
-    scalar_type operator()(const point_type& pt) const
+    scalar_type operator()(const T t, const point_type& pt) const
     {
-        return 0.0;
+        // return 0.0;
         // return M_PI*M_PI*std::sin( M_PI * pt.x() );
+        return ( M_PI*M_PI*std::cos(t) - std::sin(t) ) * std::sin( M_PI * pt.x() );
     }
 };
 
@@ -73,7 +74,7 @@ struct rhs_functor< Mesh<T, 2, Storage> >
     typedef typename mesh_type::coordinate_type scalar_type;
     typedef typename mesh_type::point_type  point_type;
 
-    scalar_type operator()(const point_type& pt) const
+    scalar_type operator()(const T t, const point_type& pt) const
     {
         return 0.0;
     }
@@ -109,7 +110,8 @@ struct solution_functor< Mesh<T, 1, Storage> >
         // assert( N > omega );
 
         // return std::sin(M_PI*K*pt.x());
-        return std::exp(-M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x());
+        // return std::exp(-M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x());
+        return std::sin( M_PI * pt.x() ) * std::cos(t);
     }
 };
 
@@ -920,10 +922,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     hho_degree_info hdi(degree, degree, degree+1);
 
     auto num_cells = msh.cells_size();
-    auto num_faces = msh.faces_size();
+    auto nb_tot_faces = msh.faces_size();
 
     // auto assembler = make_heat_dG_assembler(msh, hdi, time_degree);
-    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, true);
+    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
 
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
     auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
@@ -1199,33 +1201,41 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         lhs.block(tertial_offset + cbs, tertial_offset + cbs, cbs, cbs)
             += (1./dt) * mass;
 
-
         // at this point all the lhs terms have been implemented
-
-        // Matrix<scalar_type, Dynamic, Dynamic> mat_rhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(ah.cols()*(time_degree+1), ah.cols()*(time_degree+1));
-        // // jump term (cell - cell only)
-        // for(size_t l1 = 0; l1 <= time_degree; l1++)
-        //     for(size_t l2 = 0; l2 <= time_degree; l2++)
-        //         mat_rhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc_bis(l1,l2);
-
-        // the rhs is computed for constant functions (in time)
-        Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
-        auto space_rhs = make_rhs(msh, cl, cb, rhs_fun, 1);
-        // TODO : check this vector ...
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            rhs.block(dual_offset + l1*cbs, 0, cbs, 1) = space_rhs * time_mass(l1,0);
 
         // loop on the time steps
         for(int step_i = 0; step_i < time_steps; step_i++) {
+            Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
+
             // compute RHS -> TODO
+            auto t_cell = *(time_mesh.cells_begin()+step_i);
+            const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
+            const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+            auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
+
+            for(auto& qpt : qpst) // time integration
+            {
+                auto t_phi   = t_cb.eval_functions( qpt.point() );
+                T time_point = qpt.point().x();
+
+                for(auto& qp : qps) // space integration
+                {
+                    auto x_phi   = cb.eval_functions( qp.point() );
+                    for(size_t l1 = 0; l1 <= time_degree; l1++) // loop on time dofs
+                    {
+                        rhs.block(dual_offset + l1*cbs, 0, cbs, 1)
+                            += qp.weight() * qpt.weight() * t_phi[l1] *
+                            rhs_fun( time_point , qp.point() ) * x_phi;
+                    }
+                }
+            }
+
             // compute data
             if( varpi_fun(barycenter(msh,cl)) > 0.5 ) {
                 // compute (u , w_T)_{I_n x T}
                 Matrix<scalar_type, Dynamic, 1> data_rhs
                     = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
-                const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
-                auto t_cell = *(time_mesh.cells_begin()+step_i);
-                auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
+
                 const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
                 for(auto& qpt : qpst)
                 {
@@ -1255,7 +1265,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     cout << "LHS.rows() = " << assembler.LHS.rows() << "  "
          << "LHS.cols() = " << assembler.LHS.cols() << endl;
     cout << "2xcbsx(l+1)xNcxNt + (Nf+Nfi)xfbsx(l+1)xNt + cbsxNcx(Nt+1) = "
-         << 2*cbs*(time_degree+1)*num_cells*time_steps + (assembler.num_assembled_faces() + num_faces) * fbs * (time_degree+1) * time_steps + cbs * num_cells * (time_steps+1) << endl;
+         << 2*cbs*(time_degree+1)*num_cells*time_steps + (assembler.num_assembled_faces() + nb_tot_faces) * fbs * (time_degree+1) * time_steps + cbs * num_cells * (time_steps+1) << endl;
 
     assembler.finalize();
 
@@ -1327,6 +1337,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         size_t cell_i = 0;
         for (auto& cl : msh)
         {
+            auto fcs    = faces(msh, cl);
+            auto num_faces = fcs.size();
             auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
 
             /* compute the L2 projection in space and time */
@@ -1380,10 +1392,11 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             }
 
             const auto& bar = barycenter(msh,cl);
+            auto loc_sol = assembler.take_local_solution(msh, cl, step_i, u, sol_fun);
+
             // coordinates of the dual sol (cell components)
             Matrix<scalar_type, Dynamic, 1> dual_sol
-                 = assembler.take_local_solution(msh, cl, step_i, u, sol_fun).block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
-
+                = loc_sol.block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
 
             for(size_t l1 = 0; l1 <= time_degree; l1++)
                 for(size_t l2 = 0; l2 <= time_degree; l2++)
