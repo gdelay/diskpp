@@ -272,7 +272,7 @@ struct B_functor< Mesh<T, 1, Storage> >
         scalar_type ret;
 
         // bool Ndom4 = true;
-        bool Ndom4 = (pt.x() >= 0.25) && (pt.x() <= 0.75);
+        bool Ndom4 = (pt.x() >= 0.125) && (pt.x() <= 0.875);
         if( Ndom4 )
             ret = 1.0;
         else
@@ -912,7 +912,7 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 ///////////////////////////////////////////////
 
 template<typename Mesh>
-bool
+test_info<typename Mesh::coordinate_type>
 UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree)
 {
     typedef typename Mesh::coordinate_type  scalar_type;
@@ -1433,14 +1433,139 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     TI.L2_B = std::sqrt(L2L2_B_error);
     TI.H1_z = std::sqrt(L2H1_z);
 
-    return true;
+    return TI;
 }
 
+
+
+template<typename T>
+void
+tests_auto()
+{
+    // 1D meshes only at the moment
+    typedef disk::generic_mesh<T, 1>  mesh_type;
+
+    /*********************  REFINEMENT IN SPACE  **************************/
+    {
+        size_t nb_meshes = 4;
+
+
+        // list of export files
+        std::vector<std::string> files;
+        files.push_back("./test_space_k0.txt");
+        files.push_back("./test_space_k1.txt");
+        files.push_back("./test_space_k2.txt");
+        files.push_back("./test_space_k3.txt");
+
+        // we test space degrees from 1 to 3
+        for(int s_degree=1; s_degree < 4; s_degree++)
+        {
+            std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
+            std::cout << nocolor;
+
+            size_t t_degree = 3;
+            size_t N = 128;
+
+            // open the output file
+            std::ofstream file;
+            file.open (files.at(s_degree), std::ios::in | std::ios::trunc);
+            if (!file.is_open())
+                throw std::logic_error("file not open");
+
+            // init the file
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
+
+            // we test all the meshes in the list
+            size_t num_elems = 8;
+            for(size_t i=0; i < nb_meshes; i++)
+            {
+                num_elems *= 2;
+                // load the mesh : 1d mesh only ATM
+                mesh_type msh;
+                disk::uniform_mesh_loader<T, 1> loader(0, 1, num_elems);
+                loader.populate_mesh(msh);
+
+                // test this mesh
+                auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
+
+                // write the results in the file
+                file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
+                     << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << std::endl;
+            }
+
+            // close the file
+            file.close();
+        }
+
+    }
+    /*********************  REFINEMENT IN TIME  **************************/
+    {
+        size_t nb_meshes = 4;
+
+        std::vector<std::string> files;
+        files.push_back("./test_time_k0.txt");
+        files.push_back("./test_time_k1.txt");
+        files.push_back("./test_time_k2.txt");
+        files.push_back("./test_time_k3.txt");
+
+        // we test time degrees from 1 to 3
+        for(int t_degree=1; t_degree < 4; t_degree++)
+        {
+            std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
+            std::cout << nocolor;
+
+            size_t s_degree = 3;
+            size_t M = 256;
+
+            // open the output file
+            std::ofstream file;
+            file.open (files.at(t_degree), std::ios::in | std::ios::trunc);
+            if (!file.is_open())
+                throw std::logic_error("file not open");
+
+            // init the file
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
+
+            // we test all the meshes in the list
+            size_t N = 8;
+            for(size_t i=0; i < nb_meshes; i++)
+            {
+                N *= 2;
+                // load the mesh : 1d mesh only ATM
+                mesh_type msh;
+                disk::uniform_mesh_loader<T, 1> loader(0, 1, M);
+                loader.populate_mesh(msh);
+
+                // test this mesh
+                auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
+
+                // write the results in the file
+                file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
+                     << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << std::endl;
+            }
+
+            // close the file
+            file.close();
+        }
+    }
+}
+
+/* run main with :
+   ./heat_UC
+*/
+int main(int argc, char **argv)
+{
+    tests_auto<double>();
+    return 0;
+}
+
+#if 0
 /* run main with :
    ./heat_UC -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
    ./heat_UC -M 8 -k 1 -N 8 -l 0
 */
-
 
 int main(int argc, char **argv)
 {
@@ -1507,4 +1632,4 @@ int main(int argc, char **argv)
     UC_heat_solver(msh, degree, N, time_degree);
     return 0;
 }
-
+#endif
