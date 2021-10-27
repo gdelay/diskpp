@@ -553,7 +553,7 @@ class heat_UC_assembler
         const auto fcs = faces(msh, cl);
         const auto num_faces = fcs.size();
 
-        vector_type ret = vector_type::Zero( (num_faces * fbs + cbs) * (time_degree + 1) );
+        vector_type ret = vector_type::Zero( 2*(num_faces * fbs + cbs) * (time_degree + 1) + 2*cbs);
 
         auto cell_offset = offset(msh, cl);
 
@@ -1289,7 +1289,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     scalar_type L2L2_B_error = 0.;
     scalar_type L2H1_z = 0.;
 
-    size_t freq_exp = 1;
+    size_t freq_exp = 10000;
 
     /* Post-processing */
     // time loop
@@ -1381,11 +1381,9 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             const auto& bar = barycenter(msh,cl);
             // coordinates of the dual sol (cell components)
-            // !!!! memory error here !!!!
-            // Matrix<scalar_type, Dynamic, 1> dual_sol
-            //     = assembler.take_local_solution(msh, cl, step_i, u, sol_fun).block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
+            Matrix<scalar_type, Dynamic, 1> dual_sol
+                 = assembler.take_local_solution(msh, cl, step_i, u, sol_fun).block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
 
-            Matrix<scalar_type, Dynamic, 1> dual_sol = Matrix<scalar_type, Dynamic, 1>::Zero(cbs*(time_degree+1));
 
             for(size_t l1 = 0; l1 <= time_degree; l1++)
                 for(size_t l2 = 0; l2 <= time_degree; l2++)
