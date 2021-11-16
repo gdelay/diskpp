@@ -1159,25 +1159,26 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                             -= sigma.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
         /* Jump penalization - previous interface */
+        T jump_coeff = 1.; // 1./dt;
         // primal - primal
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 lhs.block(l1*cbs, l2*cbs, cbs, cbs)
-                    += (1./dt) * mass * time_loc(l1,l2);
+                    += jump_coeff * mass * time_loc(l1,l2);
 
         // primal - tertial
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             lhs.block(l1*cbs, tertial_offset, cbs, cbs)
-                -= (1./dt) * mass * time_loc(l1,0);
+                -= jump_coeff * mass * time_loc(l1,0);
 
         // tertial - primal
         for(size_t l2 = 0; l2 <= time_degree; l2++)
             lhs.block(tertial_offset, l2*cbs, cbs, cbs)
-                -= (1./dt) * mass * time_loc(l2,0);
+                -= jump_coeff * mass * time_loc(l2,0);
 
         // tertial - tertial
         lhs.block(tertial_offset, tertial_offset, cbs, cbs)
-            += (1./dt) * mass;
+            += jump_coeff * mass;
 
 
         /* Jump penalization - next interface */
@@ -1185,21 +1186,21 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 lhs.block(l1*cbs, l2*cbs, cbs, cbs)
-                    += (1./dt) * mass * time_loc_bis(l1,l2);
+                    += jump_coeff * mass * time_loc_bis(l1,l2);
 
         // primal - tertial
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             lhs.block(l1*cbs, tertial_offset + cbs, cbs, cbs)
-                -= (1./dt) * mass * time_loc_bis(l1,0);
+                -= jump_coeff * mass * time_loc_bis(l1,0);
 
         // tertial - primal
         for(size_t l2 = 0; l2 <= time_degree; l2++)
             lhs.block(tertial_offset + cbs, l2*cbs, cbs, cbs)
-                -= (1./dt) * mass * time_loc_bis(l2,0);
+                -= jump_coeff * mass * time_loc_bis(l2,0);
 
         // tertial - tertial
         lhs.block(tertial_offset + cbs, tertial_offset + cbs, cbs, cbs)
-            += (1./dt) * mass;
+            += jump_coeff * mass;
 
         // at this point all the lhs terms have been implemented
 
