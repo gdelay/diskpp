@@ -338,6 +338,126 @@ bool time_B(T time) {
 }
 
 ////////////////////////////////////////////////////////////////////////////
+/////////////////////   STATIC CONDENSATION  ///////////////////////////////
+////////////////////////////////////////////////////////////////////////////
+
+template<typename Mesh, typename T>
+auto make_UC_heat_static_condensation(const Mesh& msh,
+                                      const typename Mesh::cell_type& cl,
+                                      const hho_degree_info& hdi,
+                                      size_t time_degree,
+                                      const typename Eigen::Matrix<T, Dynamic, Dynamic>& lhs,
+                                      const typename Eigen::Matrix<T, Dynamic, 1>& rhs)
+{
+    using matrix_type = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+    using vector_type = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+
+    const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
+    const auto num_faces     = howmany_faces(msh, cl);
+    const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
+
+    // size of the condensed linear system
+    size_t cond_size = 2 * cbs;
+    // size of the rest of the system
+    size_t rest_sys_size = 2 * (cbs + num_faces * fbs) * (time_degree+1);
+    size_t tot_size = rest_sys_size + cond_size;
+
+    // check that the matrix has the right size
+    assert(lhs.rows() == lhs.cols());
+    assert(lhs.rows() == tot_size);
+    assert(rhs.size() == tot_size);
+
+    // the matrix is under the form
+    // ( A B )
+    // ( C D )
+    matrix_type A(rest_sys_size,rest_sys_size), B(rest_sys_size, cond_size),
+        C(cond_size, rest_sys_size), D(cond_size,cond_size);
+
+    A = lhs.block(0, rest_sys_size, 0, rest_sys_size);
+    B = lhs.block(0, rest_sys_size, rest_sys_size, cond_size);
+    C = lhs.block(rest_sys_size, cond_size, 0, rest_sys_size);
+    D = lhs.block(rest_sys_size, cond_size, rest_sys_size, cond_size);
+
+    // the RHS is under the form
+    // ( E )
+    // ( F )
+    vector_type E(rest_sys_size), F(cond_size);
+    E = rhs.head(rest_sys_size);
+    F = rhs.tail(cond_size);
+
+    // invert the matrix
+    auto A_inv = A.colPivHouseholderQr();
+
+    // condensed system
+    matrix_type mat = D - C * A_inv.solve(B);
+    vector_type vec = F - C * A_inv.solve(E);
+
+    return std::make_pair(D,F);
+}
+
+/////////////////////////////////////////////////
+
+template<typename Mesh, typename T>
+auto make_UC_heat_static_decondensation(const Mesh& msh,
+                                        const typename Mesh::cell_type& cl,
+                                        const hho_degree_info& hdi,
+                                        size_t time_degree,
+                                        const typename Eigen::Matrix<T, Dynamic, Dynamic>& lhs,
+                                        const typename Eigen::Matrix<T, Dynamic, 1>& rhs,
+                                        const typename Eigen::Matrix<T, Dynamic, 1>& cond_sol)
+{
+    using matrix_type = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+    using vector_type = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+
+    const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
+    const auto num_faces     = howmany_faces(msh, cl);
+    const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
+
+    // size of the condensed linear system
+    size_t cond_size = 2 * cbs;
+    // size of the rest of the system
+    size_t rest_sys_size = 2 * (cbs + num_faces * fbs) * (time_degree+1);
+    size_t tot_size = rest_sys_size + cond_size;
+
+    // check that the matrix has the right size
+    assert(lhs.rows() == lhs.cols());
+    assert(lhs.rows() == tot_size);
+    assert(rhs.size() == tot_size);
+    assert(cond_sol.size() == cond_size);
+
+    // the matrix is under the form
+    // ( A B )
+    // ( C D )
+    matrix_type A(rest_sys_size,rest_sys_size), B(rest_sys_size, cond_size),
+        C(cond_size, rest_sys_size), D(cond_size,cond_size);
+
+    A = lhs.block(0, rest_sys_size, 0, rest_sys_size);
+    B = lhs.block(0, rest_sys_size, rest_sys_size, cond_size);
+    C = lhs.block(rest_sys_size, cond_size, 0, rest_sys_size);
+    D = lhs.block(rest_sys_size, cond_size, rest_sys_size, cond_size);
+
+    // the RHS is under the form
+    // ( E )
+    // ( F )
+    vector_type E(rest_sys_size), F(cond_size);
+    E = rhs.head(rest_sys_size);
+    F = rhs.tail(cond_size);
+
+    // invert the matrix
+    auto A_inv = A.colPivHouseholderQr();
+
+    // temporary RHS
+    vector_type temp_rhs = E - B * cond_sol;
+
+    // decondensed solution
+    vector_type sol_tot(tot_size);
+    sol_tot.head(rest_sys_size) = A_inv.solve(temp_rhs);
+    sol_tot.tail(cond_size) = cond_sol;
+
+    return sol_tot;
+}
+
+////////////////////////////////////////////////////////////////////////////
 ////////////////////////   ASSEMBLERS  /////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////
 
