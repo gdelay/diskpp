@@ -790,6 +790,8 @@ make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_
 // TODO : update ams_map, assemble, finalize, take_sol
 // peut on avoir des rhs qui sont time-dependent ?? -> si oui alors mettre les commentaires a jour dans les deux classes
 
+// TODO : in both assemblers, in take_local_sol : take into account the Dirichlet conditions when considered
+
 // condensed_heat_UC_assembler : assembler using static condensation in time
 // attention : we assume that the time mesh is uniform and the time basis is center
 //             at all time cells so that the contributions are the same for all time cells
@@ -1031,14 +1033,17 @@ class condensed_heat_UC_assembler
 
         // primal variable : cell components
         ret.block(0, 0, (time_degree+1)*cbs, 1)
-            = solution.block(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
+            = solution.block(num_cells * cbs * (time_degree+1) * n_step + cell_offset * cbs * (time_degree+1), 0, (time_degree+1)*cbs, 1);
 
 
         // primal variable : face components
+        size_t num_sol_faces = num_all_faces;
+        if( BC_known ) num_sol_faces = num_other_faces;
         for (size_t face_i = 0; face_i < num_faces; face_i++)
         {
             const auto fc = fcs[face_i];
 
+            // we should take into account the case of Dirichlet BC
 
             // Dirichlet data not taken into account
             // if (dirichlet)
@@ -1050,8 +1055,8 @@ class condensed_heat_UC_assembler
 
             const auto face_offset     = offset(msh, fc);
             auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps;
-            if(BC_known) face_LHS_offset += compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // compress table
-            else face_LHS_offset += face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
+            if(BC_known) face_LHS_offset += num_sol_faces * fbs * (time_degree+1) * n_step + compress_table.at(face_offset) * fbs * (time_degree+1); // compress table
+            else face_LHS_offset += num_sol_faces * fbs * (time_degree+1) * n_step + face_offset * fbs * (time_degree+1); // no Dirichlet BC so no compress table
 
 
             auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
@@ -1067,11 +1072,14 @@ class condensed_heat_UC_assembler
         }
 
         // dual variable : cell components
-        size_t num_sol_faces = num_all_faces;
-        if(BC_known) num_sol_faces = num_other_faces;
+        // size_t num_sol_faces = num_all_faces;
+        // if(BC_known) num_sol_faces = num_other_faces;
         size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
         ret.block((cbs + num_faces*fbs)*(time_degree+1), 0, (time_degree+1)*cbs, 1)
-            = solution.block(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
+            = solution.block(dual_offset + num_cells * cbs * (time_degree+1) * n_step + cbs * (time_degree+1) * cell_offset, 0, (time_degree+1)*cbs, 1);
+
+
+        cout << "loc dual sol.norm() = " << solution.block(dual_offset + num_cells * cbs * (time_degree+1) * n_step + cbs * (time_degree+1) * cell_offset, 0, (time_degree+1)*cbs, 1).norm() << endl;
 
 
         // dual variable : face components (BC)
@@ -1095,7 +1103,7 @@ class condensed_heat_UC_assembler
             {
                 const auto face_offset     = offset(msh, fc);
                 const auto face_SOL_offset = dual_offset + num_cells * cbs * (time_degree+1) * time_steps
-                + compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step;
+                + num_other_faces * fbs * (time_degree+1) * n_step + compress_table.at(face_offset) * fbs * (time_degree+1);
 
                 ret.block((2*cbs + num_faces*fbs)*(time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
                     = solution.block(face_SOL_offset, 0, fbs * (time_degree+1), 1);
@@ -1104,9 +1112,12 @@ class condensed_heat_UC_assembler
 
         // tertial variable
         size_t tertial_offset = 2 * num_cells * cbs * (time_degree+1) * time_steps + (num_sol_faces + num_other_faces) * fbs * (time_degree+1) * time_steps;
-        ret.block(2*(cbs + num_faces*fbs)*(time_degree+1), 0, 2*cbs, 1)
-            = solution.block(tertial_offset + cell_offset * cbs * (time_steps+1) + cbs * n_step, 0, 2*cbs, 1);
-
+        // first time interface
+        ret.block(2*(cbs + num_faces*fbs)*(time_degree+1), 0, cbs, 1)
+            = solution.block(tertial_offset + num_cells * cbs * (time_steps+1) * n_step + cell_offset * cbs, 0, cbs, 1);
+        // second time interface
+ret.block(2*(cbs + num_faces*fbs)*(time_degree+1)+cbs, 0, cbs, 1)
+    = solution.block(tertial_offset + num_cells * cbs * (time_steps+1) * (n_step+1) + cell_offset * cbs, 0, cbs, 1);
         return ret;
     }
 
@@ -1121,13 +1132,52 @@ class condensed_heat_UC_assembler
         // compute the condensed RHS
         // TODO
 
-        // ams_map for the global system
+
+        const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
+        const auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
 
         // triplets for the global matrix
-        // for(size_t t_s = 0; t_s<time_steps; t_s++)
-        // {
-        //     triplets.push_back( Triplet<T>() );
-        // }
+        for(size_t t_s = 0; t_s<time_steps; t_s++)
+        {
+            // ams_map for the global system
+            std::vector<assembly_index> asm_map;
+            asm_map.reserve(loc_system_size);
+
+            // primal sol : cell components
+            for(size_t i = 0; i < num_cells*cbs*(time_degree+1); i++)
+                asm_map.push_back(assembly_index(num_cells*cbs*(time_degree+1)*t_s + i, true));
+
+            // primal sol : face components
+            size_t num_sol_faces = num_all_faces;
+            if( BC_known ) num_sol_faces = num_other_faces;
+            size_t face_offset = num_cells*cbs*(time_degree+1)*time_steps;
+            for(size_t i = 0; i < num_sol_faces * fbs * (time_degree+1); i++)
+                asm_map.push_back(assembly_index(face_offset + num_sol_faces * fbs * (time_degree+1) * t_s + i, true));
+
+            // dual sol : cell components
+            size_t dual_offset = face_offset + num_sol_faces * fbs * (time_degree+1) * time_steps;
+            for(size_t i = 0; i < num_cells*cbs*(time_degree+1); i++)
+                asm_map.push_back(assembly_index(dual_offset + num_cells*cbs*(time_degree+1)*t_s + i, true));
+
+            // dual sol : face components
+            for(size_t i = 0; i < num_other_faces * fbs * (time_degree+1); i++)
+                asm_map.push_back(assembly_index(dual_offset + face_offset + num_other_faces * fbs * (time_degree+1) * t_s + i, true));
+
+            // tertial sol
+            size_t tertial_offset = dual_offset + face_offset + num_other_faces * fbs * (time_degree+1) * time_steps;
+            for(size_t i = 0; i < 2*num_cells*cbs*(time_degree+1); i++)
+                asm_map.push_back(assembly_index(tertial_offset + num_cells*cbs*t_s + i, true));
+
+            // build the triplets
+            for(size_t i=0; i<loc_system_size; i++)
+            {
+                for(size_t j=0; j<loc_system_size; j++)
+                {
+                    triplets.push_back( Triplet<T>(asm_map[i], asm_map[j], locMat(i,j) ) );
+                }
+            }
+
+        }
 
         // prepare global matrix
         LHS.setFromTriplets(triplets.begin(), triplets.end());
@@ -1410,8 +1460,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto num_cells = msh.cells_size();
     auto nb_tot_faces = msh.faces_size();
 
-    // auto assembler = make_heat_dG_assembler(msh, hdi, time_degree);
-    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
+    auto assembler = make_condensed_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
+    // auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
 
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
     auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
@@ -1866,9 +1916,11 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             /******** compute errors ********/
 
+            auto loc_sol = assembler.take_local_solution(msh, cl, step_i, u, sol_fun);
+
             /* compute L2-H1-error of the current time step */
             Matrix<scalar_type, Dynamic, 1> diff
-                = u.block(cell_i*cbs*(time_degree+1)*time_steps + cbs * (time_degree+1) * step_i, 0, cbs*(time_degree+1), 1) - proj;
+                = loc_sol.block(0, 0, cbs*(time_degree+1), 1) - proj;
 
             Matrix<scalar_type, Dynamic, Dynamic> grad_matrix
                 = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs , cbs);
@@ -1879,11 +1931,12 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             }
 
             const auto& bar = barycenter(msh,cl);
-            auto loc_sol = assembler.take_local_solution(msh, cl, step_i, u, sol_fun);
 
             // coordinates of the dual sol (cell components)
             Matrix<scalar_type, Dynamic, 1> dual_sol
                 = loc_sol.block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
+
+            cout << "dual_sol.norm() = " << dual_sol.norm() << endl;
 
             for(size_t l1 = 0; l1 <= time_degree; l1++)
                 for(size_t l2 = 0; l2 <= time_degree; l2++)
@@ -2162,6 +2215,7 @@ tests_auto_2d()
 /* run main with :
    ./heat_UC
 */
+#if 0
 int main(int argc, char **argv)
 {
     tests_auto_1d<double>();
@@ -2169,7 +2223,7 @@ int main(int argc, char **argv)
     return 0;
 }
 
-#if 0
+#else
 /* run main with :
    ./heat_UC -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
    ./heat_UC -M 8 -k 1 -N 8 -l 0
