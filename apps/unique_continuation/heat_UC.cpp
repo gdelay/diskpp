@@ -537,7 +537,7 @@ class heat_UC_assembler
     } // assemble()
 
     /*
-     * lhs and rhs have to have the size of two time cells
+     * lhs must have the size of two time cells
      * n_step is between 1 and time_steps-1 (both included)
      * the faces are not taken into account (the time coupling occurs through space cells only)
      */
@@ -552,27 +552,33 @@ class heat_UC_assembler
 
         std::vector<assembly_index> asm_map;
         size_t loc_size = 4 * cbs * (time_degree + 1);
+        /*
+         * degrees of freedom (cell variables) :
+         * - primal variable (previous time step)
+         * - dual variable (previous time step)
+         * - primal variable (next time step)
+         * - dual variable (next time step)
+         */
         asm_map.reserve(loc_size);
 
-        /* primal variable */
+        /* previous time step */
         auto cell_offset = offset(msh, cl);
+        size_t num_sol_faces = num_all_faces;
+        if( BC_known ) num_sol_faces = num_other_faces;
+        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
 
         // cell components of the primal variable (previous time step)
         for(size_t i = 0; i < cbs*(time_degree+1); i++)
             asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * (n_step-1) + i, true));
 
-        // cell components of the primal variable (next time step)
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-        /* dual variable */
-        size_t num_sol_faces = num_all_faces;
-        if( BC_known ) num_sol_faces = num_other_faces;
-        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
-
         // cell components of the dual variable (previous time step)
         for(size_t i = 0; i < cbs*(time_degree+1); i++)
             asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * (n_step-1) + i, true));
+
+        /* next time step */
+        // cell components of the primal variable (next time step)
+        for(size_t i = 0; i < cbs*(time_degree+1); i++)
+            asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
 
         // cell components of the dual variable (next time step)
         for(size_t i = 0; i < cbs*(time_degree+1); i++)
