@@ -1290,12 +1290,14 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         for(int step_i = 0; step_i < time_steps; step_i++) {
             Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
 
-            // compute RHS -> TODO
             auto t_cell = *(time_mesh.cells_begin()+step_i);
             const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
             const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
             auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
 
+            T noise_size = 0.001;
+
+            // heat equation RHS
             for(auto& qpt : qpst) // time integration
             {
                 auto t_phi   = t_cb.eval_functions( qpt.point() );
@@ -1304,33 +1306,44 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 for(auto& qp : qps) // space integration
                 {
                     auto x_phi   = cb.eval_functions( qp.point() );
+
+                    // T noise = noise_size * ((std::rand() % 200)-100) * 0.01;
+                    T noise = 0.0;
+                    T noised_data = rhs_fun( time_point , qp.point() ) + noise;
+
                     for(size_t l1 = 0; l1 <= time_degree; l1++) // loop on time dofs
                     {
                         rhs.block(dual_offset + l1*cbs, 0, cbs, 1)
                             += qp.weight() * qpt.weight() * t_phi[l1] *
-                            rhs_fun( time_point , qp.point() ) * x_phi;
+                            noised_data * x_phi;
                     }
                 }
             }
 
-            // compute data
+            // solution measurements
             if( varpi_fun(barycenter(msh,cl)) > 0.5 ) {
                 // compute (u , w_T)_{I_n x T}
                 Matrix<scalar_type, Dynamic, 1> data_rhs
                     = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
 
-                const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
+                // time integration
                 for(auto& qpt : qpst)
                 {
                     auto t_phi   = t_cb.eval_functions( qpt.point() );
                     T time_point = qpt.point().x();
 
+                    // space integration
                     for(auto& qp : qps)
                     {
                         auto x_phi   = cb.eval_functions( qp.point() );
+
+                        T noise = noise_size * ((std::rand() % 200)-100) * 0.01;
+                        // T noise = 0.0;
+                        T noised_data = sol_fun( time_point , qp.point() ) + noise;
+
                         for(size_t l1 = 0; l1 <= time_degree; l1++)
                         {
-                            data_rhs.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * sol_fun( time_point, qp.point() ) * x_phi;
+                            data_rhs.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * noised_data * x_phi;
                         }
                     }
                 }
