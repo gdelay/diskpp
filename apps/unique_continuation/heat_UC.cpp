@@ -977,7 +977,6 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto num_cells = msh.cells_size();
     auto nb_tot_faces = msh.faces_size();
 
-    // auto assembler = make_heat_dG_assembler(msh, hdi, time_degree);
     auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
 
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
@@ -1074,12 +1073,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         auto fcs    = faces(msh, cl);
         auto num_faces = fcs.size();
         auto cb     = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
-        // auto gr     = make_scalar_hho_laplacian(msh, cl, hdi);
         auto ah     = make_DGH_laplacian(msh, cl, hdi);
-        // auto stab   = make_scalar_hho_stabilization(msh, cl, gr.first, hdi);
         auto stab   = make_no_proj_stabilization(msh, cl, hdi);
         auto mass   = make_mass_matrix(msh, cl, cb);
-        // Matrix<scalar_type, Dynamic, Dynamic> ah = gr.second + stab;
+        auto stiff   = make_stiffness_matrix(msh, cl, cb);
 
         size_t loc_size = 2*ah.cols()*(time_degree+1);
 
@@ -1261,6 +1258,31 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
                     -= jump_coeff * mass * time_loc_cross(l1,l2);
+
+        /* coupling coming from the gradient time jump penalization */
+        // (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^+))_{Omega}
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                coupling.block(ts_c + l1*cbs, ts_c + l2*cbs, cbs, cbs)
+                    += jump_coeff * stiff * time_loc(l1,l2);
+
+        // (\GRAD v_T(t_{n-1}^-) , \GRAD w_T(t_{n-1}^-))_{Omega}
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                coupling.block(l1*cbs, l2*cbs, cbs, cbs)
+                    += jump_coeff * stiff * time_loc_bis(l1,l2);
+
+        // - (\GRAD v_T(t_{n-1}^-) , \GRAD w_T(t_{n-1}^+))_{Omega}
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                coupling.block(ts_c + l1*cbs, l2*cbs, cbs, cbs)
+                    -= jump_coeff * stiff * time_loc_cross(l2,l1);
+
+        // - (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^-))_{Omega}
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
+                    -= jump_coeff * stiff * time_loc_cross(l1,l2);
 
         // at this point all the coupling terms have been implemented
 
