@@ -76,7 +76,8 @@ struct rhs_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return 0.0;
+        return ( 2*M_PI*M_PI*std::cos(t) - std::sin(t) ) * std::sin( M_PI * pt.x() )
+            * std::sin( M_PI * pt.y() );
     }
 };
 
@@ -98,19 +99,11 @@ struct solution_functor< Mesh<T, 1, Storage> >
     typedef typename mesh_type::coordinate_type scalar_type;
     typedef typename mesh_type::point_type  point_type;
 
-    T omega;
-
-    solution_functor< Mesh<T, 1, Storage> >(const T omega_)
-        : omega(omega_)
+    solution_functor< Mesh<T, 1, Storage> >()
         {}
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        int K = 1;
-        // assert( N > omega );
-
-        // return std::sin(M_PI*K*pt.x());
-        // return std::exp(-M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x());
         return std::sin( M_PI * pt.x() ) * std::cos(t);
     }
 };
@@ -123,73 +116,19 @@ struct solution_functor< Mesh<T, 2, Storage> >
     typedef typename mesh_type::coordinate_type scalar_type;
     typedef typename mesh_type::point_type  point_type;
 
-    T omega;
-
-    solution_functor< Mesh<T, 2, Storage> >(const T omega_)
-        : omega(omega_)
+    solution_functor< Mesh<T, 2, Storage> >()
         {}
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        int K = 1;
-        // assert( N > omega );
-
-        // return std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
-        return std::exp(-2*M_PI*M_PI*K*K*t) * std::sin(M_PI*K*pt.x()) * std::sin(M_PI*K*pt.y());
+        return std::cos(t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
     }
 };
 
 template<typename Mesh>
-auto make_solution_function(const Mesh& msh, const typename Mesh::coordinate_type omega_)
+auto make_solution_function(const Mesh& msh)
 {
-    return solution_functor<Mesh>(omega_);
-}
-
-/***************************************************************************/
-/* gradients of the expected solution */
-template<typename Mesh>
-struct grad_functor;
-
-template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
-struct grad_functor< Mesh<T, 2, Storage> >
-{
-    typedef Mesh<T,2,Storage>               mesh_type;
-    typedef typename mesh_type::coordinate_type scalar_type;
-    typedef typename mesh_type::point_type  point_type;
-
-    grad_functor< Mesh<T, 2, Storage> >(const T omega_)
-        : omega(omega_)
-        {}
-
-    T omega;
-
-    auto operator()(const point_type& pt) const
-    {
-        int N = 3;
-        Matrix<T, 1, 2> ret;
-        // T coeff = omega / std::sqrt(2);
-        // auto sin_cx = std::sin(coeff * pt.x());
-        // auto sin_cy = std::sin(coeff * pt.y());
-        // auto cos_cx = std::cos(coeff * pt.x());
-        // auto cos_cy = std::cos(coeff * pt.y());
-
-        T coeff = std::sqrt( N*N - omega*omega );
-        T sinh = 0.5 * ( std::exp(coeff * pt.y()) - std::exp(-coeff * pt.y()) );
-        T cosh = 0.5 * ( std::exp(coeff * pt.y()) + std::exp(-coeff * pt.y()) );
-
-        // ret(0) = - coeff * sin_cx * cos_cy;
-        // ret(1) = - coeff * cos_cx * sin_cy;
-
-        ret(0) = N * std::cos(N*pt.x()) * sinh / coeff;
-        ret(1) = std::sin(N*pt.x()) * cosh;
-        return ret;
-    }
-};
-
-template<typename Mesh>
-auto make_grad_function(const Mesh& msh, const typename Mesh::coordinate_type omega_)
-{
-    return grad_functor<Mesh>(omega_);
+    return solution_functor<Mesh>();
 }
 
 /***************************************************************************/
@@ -786,7 +725,7 @@ export_to_silo(const Mesh<T, 1, Storage>& msh,
     if(!ex_sol_file)
         std::cerr << "error opening file !!" << std::endl;
 
-    auto sol_fun = make_solution_function(msh,0);
+    auto sol_fun = make_solution_function(msh);
 
     int N = 32;
     double t = (2./N) * (cycle+0.5);
@@ -984,14 +923,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     timecounter tc;
 
-    int K = 1; // index for the exact solution
     scalar_type final_time = 2.;
 
-    T omega = 1;
-
     auto rhs_fun = make_rhs_function(msh);
-    auto sol_fun = make_solution_function(msh,omega);
-    // auto sol_grad = make_grad_function(msh,omega);
+    auto sol_fun = make_solution_function(msh);
 
     auto varpi_fun = make_varpi_function(msh);
     auto B_fun = make_B_function(msh);
@@ -1657,16 +1592,15 @@ template<typename T>
 void
 tests_auto_2d()
 {
-    typedef disk::generic_mesh<T, 2>  mesh_type;
+    typedef disk::simplicial_mesh<T, 2>  mesh_type;
 
     /*********************  REFINEMENT IN SPACE  **************************/
     {
         // list of mesh files
         std::vector<std::string> meshes;
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/fvca5/mesh1_2.typ1");
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/fvca5/mesh1_3.typ1");
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/fvca5/mesh1_4.typ1");
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/fvca5/mesh1_5.typ1");
+        meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
+        meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
+        meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
 
         size_t nb_meshes = meshes.size();
 
@@ -1677,14 +1611,14 @@ tests_auto_2d()
         files.push_back("./test_space_k2.txt");
         files.push_back("./test_space_k3.txt");
 
-        // we test space degrees from 1 to 3
-        for(int s_degree=1; s_degree < 4; s_degree++)
+        // we test space degree 1 only
+        for(int s_degree=1; s_degree < 2; s_degree++)
         {
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 3;
-            size_t N = 128;
+            size_t t_degree = 1;
+            size_t N = 32;
 
             // open the output file
             std::ofstream file;
@@ -1696,11 +1630,10 @@ tests_auto_2d()
             file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
 
             // we test all the meshes in the list
-            // size_t num_elems = 8;
             for(size_t i=0; i < nb_meshes; i++)
             {
                 mesh_type msh;
-                disk::fvca5_mesh_loader<T, 2> loader;
+                disk::netgen_mesh_loader<T, 2> loader;
                 if( !loader.read_mesh(meshes.at(i)) )
                     std::cout << "error loading mesh !" << std::endl;
                 loader.populate_mesh(msh);
@@ -1729,14 +1662,13 @@ tests_auto_2d()
         files.push_back("./test_time_k2.txt");
         files.push_back("./test_time_k3.txt");
 
-        // we test time degrees from 1 to 3
-        for(int t_degree=1; t_degree < 4; t_degree++)
+        // we test time degree 0 only
+        for(int t_degree=0; t_degree < 1; t_degree++)
         {
             std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
             std::cout << nocolor;
 
-            size_t s_degree = 3;
-            // size_t M = 256;
+            size_t s_degree = 2;
 
             // open the output file
             std::ofstream file;
@@ -1748,14 +1680,15 @@ tests_auto_2d()
             file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
 
             // we test all the meshes in the list
-            size_t N = 8;
+            size_t N = 2;
             for(size_t i=0; i < nb_meshes; i++)
             {
                 N *= 2;
-                auto msh = disk::load_fvca5_2d_mesh<T>("./../../../diskpp/meshes/2D_triangles/fvca5/mesh1_5.typ1");
-                // mesh_type msh;
-                // disk::uniform_mesh_loader<T, 1> loader(0, 1, M);
-                // loader.populate_mesh(msh);
+                mesh_type msh;
+                disk::netgen_mesh_loader<T, 2> loader;
+                if( !loader.read_mesh("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d") )
+                    std::cout << "error loading mesh !" << std::endl;
+                loader.populate_mesh(msh);
 
                 // test this mesh
                 auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
