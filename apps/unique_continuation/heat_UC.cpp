@@ -1359,7 +1359,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             {
                 const auto& bar = barycenter(msh,cl);
                 data_varpi(cell_i) = varpi_fun( bar );
-                data_B(cell_i) = varpi_fun( bar );
+                data_B(cell_i) = B_fun( bar );
                 cell_i++;
             }
             export_to_silo( msh, sol_silo, data_varpi, data_B, step_i );
