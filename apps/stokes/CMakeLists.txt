@@ -3,6 +3,9 @@ if (BUILD_APP_STOKES)
     add_executable(stokes stokes.cpp)
     target_link_libraries(stokes ${LINK_LIBS})
 
+    add_executable(stokes_interface stokes_interface.cpp)
+    target_link_libraries(stokes_interface ${LINK_LIBS})
+
     #add_executable(couette stokes_test_couette.cpp)
     #target_link_libraries(couette ${LINK_LIBS})
 
