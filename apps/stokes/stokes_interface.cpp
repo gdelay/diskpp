@@ -104,7 +104,7 @@ struct velocity_functor< Mesh<T, 2, Storage> >
         // ret(0) =  x2 * (x2 - 2. * x1 + 1.)  * y1 * (4. * y2 - 6. * y1 + 2.);
         // ret(1) = -y2 * (y2 - 2. * y1 + 1. ) * x1 * (4. * x2 - 6. * x1 + 2.);
 
-        ret(0) = 1000 * pt.y() * (1 - pt.y()) * 0.5;
+        ret(0) = 1000 * pt.y() * (1 - pt.y()) * 0.5 * 0.5;
         ret(1) = 0.;
 
         return ret;
@@ -132,7 +132,7 @@ struct pressure_functor< Mesh<T, 2, Storage> >
     scalar_type operator()(const point_type& pt) const
     {
         // return std::pow(pt.x(), 5.)  +  std::pow(pt.y(), 5.)  - 1./3.;
-        return 1000 * (1-pt.x());
+        return 1000 * (2-pt.x()) * 0.5;
     }
 };
 
@@ -565,9 +565,10 @@ compute_errors(const Mesh& msh,
 
 /////////////////////////////////////////////
 
+// int_num : number of interface points
 template<typename Mesh>
 auto
-run_interface(const Mesh& msh, size_t degree)
+run_interface(const Mesh& msh, size_t degree, size_t int_num)
 {
     typedef Mesh mesh_type;
     typedef typename mesh_type::cell        cell_type;
@@ -681,12 +682,12 @@ void convergence_test_typ1(void)
     bool use_sym_grad = true;
     std::vector<std::string> meshfiles;
 
-    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh1.geo2s");
-    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh2.geo2s");
-    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh3.geo2s");
-    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh4.geo2s");
-    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh5.geo2s");
-    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh6.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle1.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle2.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle3.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle4.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle5.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle6.geo2s");
 
     /*
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
@@ -731,6 +732,7 @@ void convergence_test_typ1(void)
 
         for (size_t i = 0; i < meshfiles.size(); i++)
         {
+            size_t nb_points = 4*i;
             // typedef disk::generic_mesh<T, 2>  mesh_type;
             // typedef disk::simplicial_mesh<T, 2>  mesh_type;
 
@@ -766,7 +768,7 @@ void convergence_test_typ1(void)
             }
             loader.populate_mesh(msh);
 
-            auto error = run_interface(msh, k);
+            auto error = run_interface(msh, k, nb_points);
 
             mesh_hs.push_back( disk::average_diameter(msh) );
             errors.push_back(error);
@@ -859,16 +861,17 @@ void run_Neumann_tests(void)
     disk::simplicial_mesh<T,2> msh;
     disk::gmsh_geometry_loader< disk::simplicial_mesh<T,2> > loader;
 
-    // loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh1.geo2s");
-    loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh2.geo2s");
-    // loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh3.geo2s");
-    // loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh4.geo2s");
+    // loader.read_mesh("../../../diskpp/apps/stokes/rectangle1.geo2s");
+    // loader.read_mesh("../../../diskpp/apps/stokes/rectangle2.geo2s");
+    loader.read_mesh("../../../diskpp/apps/stokes/rectangle2.geo2s");
+    // loader.read_mesh("../../../diskpp/apps/stokes/rectangle3.geo2s");
+    // loader.read_mesh("../../../diskpp/apps/stokes/rectangle4.geo2s");
     loader.populate_mesh(msh);
 
     std::cout << "mesh loaded !" << std::endl;
 
     test_Neumann_meshes(msh);
-    run_interface(msh, 0);
+    run_interface(msh, 0, 4);
 
 }
 
