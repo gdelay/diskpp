@@ -30,6 +30,7 @@
 #include "methods/hho"
 #include "core/loaders/loader.hpp"
 #include "solvers/solver.hpp"
+#include "output/silo.hpp"
 
 
 //////////////////   test case   ///////////////////
@@ -49,22 +50,25 @@ struct rhs_functor< Mesh<T, 2, Storage> >
     {
         Matrix<scalar_type, 2, 1> ret;
 
-        scalar_type x1 = pt.x();
-        scalar_type x2 = x1 * x1;
-        scalar_type y1 = pt.y();
-        scalar_type y2 = y1 * y1;
+        // scalar_type x1 = pt.x();
+        // scalar_type x2 = x1 * x1;
+        // scalar_type y1 = pt.y();
+        // scalar_type y2 = y1 * y1;
 
-        scalar_type ax =  x2 * (x2 - 2. * x1 + 1.);
-        scalar_type ay =  y2 * (y2 - 2. * y1 + 1.);
-        scalar_type bx =  x1 * (4. * x2 - 6. * x1 + 2.);
-        scalar_type by =  y1 * (4. * y2 - 6. * y1 + 2.);
-        scalar_type cx = 12. * x2 - 12.* x1 + 2.;
-        scalar_type cy = 12. * y2 - 12.* y1 + 2.;
-        scalar_type dx = 24. * x1 - 12.;
-        scalar_type dy = 24. * y1 - 12.;
+        // scalar_type ax =  x2 * (x2 - 2. * x1 + 1.);
+        // scalar_type ay =  y2 * (y2 - 2. * y1 + 1.);
+        // scalar_type bx =  x1 * (4. * x2 - 6. * x1 + 2.);
+        // scalar_type by =  y1 * (4. * y2 - 6. * y1 + 2.);
+        // scalar_type cx = 12. * x2 - 12.* x1 + 2.;
+        // scalar_type cy = 12. * y2 - 12.* y1 + 2.;
+        // scalar_type dx = 24. * x1 - 12.;
+        // scalar_type dy = 24. * y1 - 12.;
 
-        ret(0) = - cx * by - ax * dy + 5.* x2 * x2;
-        ret(1) = + cy * bx + ay * dx + 5.* y2 * y2;
+        // ret(0) = - cx * by - ax * dy + 5.* x2 * x2;
+        // ret(1) = + cy * bx + ay * dx + 5.* y2 * y2;
+
+        ret(0) = 0.;
+        ret(1) = 0.;
 
         return ret;
     }
@@ -92,13 +96,16 @@ struct velocity_functor< Mesh<T, 2, Storage> >
     {
         Matrix<scalar_type, 2, 1> ret;
 
-        scalar_type x1 = pt.x();
-        scalar_type x2 = x1 * x1;
-        scalar_type y1 = pt.y();
-        scalar_type y2 = y1 * y1;
+        // scalar_type x1 = pt.x();
+        // scalar_type x2 = x1 * x1;
+        // scalar_type y1 = pt.y();
+        // scalar_type y2 = y1 * y1;
 
-        ret(0) =  x2 * (x2 - 2. * x1 + 1.)  * y1 * (4. * y2 - 6. * y1 + 2.);
-        ret(1) = -y2 * (y2 - 2. * y1 + 1. ) * x1 * (4. * x2 - 6. * x1 + 2.);
+        // ret(0) =  x2 * (x2 - 2. * x1 + 1.)  * y1 * (4. * y2 - 6. * y1 + 2.);
+        // ret(1) = -y2 * (y2 - 2. * y1 + 1. ) * x1 * (4. * x2 - 6. * x1 + 2.);
+
+        ret(0) = 1000 * pt.y() * (1 - pt.y()) * 0.5;
+        ret(1) = 0.;
 
         return ret;
     }
@@ -124,7 +131,8 @@ struct pressure_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const point_type& pt) const
     {
-        return std::pow(pt.x(), 5.)  +  std::pow(pt.y(), 5.)  - 1./3.;
+        // return std::pow(pt.x(), 5.)  +  std::pow(pt.y(), 5.)  - 1./3.;
+        return 1000 * (1-pt.x());
     }
 };
 
@@ -589,9 +597,21 @@ run_interface(const Mesh& msh, size_t degree)
     auto neumann = [](const disk::point<T, 2>& p) -> result_type {
                        return result_type{std::pow(p.y(), 5.)  - 1./3.,
                                2.*p.y()*p.y()*(p.y()-1)*(p.y()-1)}; };
+    scalar_type p_in = 1000.;
+    auto p_neumann = [p_in](const disk::point<T, 2>& p) -> result_type {return result_type{p_in,0.}; };
     // on netgen meshes : id = 2 on x=0 and id = 1 on the other parts of the boundary
-    bnd.addDirichletBC(disk::DIRICHLET, 1, zero);
-    bnd.addNeumannBC(disk::NEUMANN, 2, neumann);
+    if(false) {
+        bnd.addDirichletBC(disk::DIRICHLET, 1, zero);
+        bnd.addNeumannBC(disk::NEUMANN, 2, neumann);
+    }
+    // on gmsh meshes : id = 0 on y=0, id = 1 on x=1, id = 2 on y=1, id = 3 on x=0
+    else
+    {
+        bnd.addDirichletBC(disk::DIRICHLET, 0, zero);
+        bnd.addNeumannBC(disk::NEUMANN, 1, zero);
+        bnd.addDirichletBC(disk::DIRICHLET, 2, zero);
+        bnd.addNeumannBC(disk::NEUMANN, 3, p_neumann);
+    }
 
     // assembler for the problem
     auto assembler = make_interface_assembler(msh, hdi, bnd);
@@ -618,6 +638,33 @@ run_interface(const Mesh& msh, size_t degree)
     disk::solvers::pardiso_params<scalar_type> pparams;
     mkl_pardiso_ldlt(pparams, assembler.LHS, assembler.RHS, sol);
 
+
+    /* export solution */
+    disk::silo_database silo_db;
+    silo_db.create("stokes.silo");
+    silo_db.add_mesh(msh, "mesh");
+
+    Matrix<scalar_type, Dynamic, 1> data_p = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+    Matrix<scalar_type, Dynamic, 1> data_vx = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+    Matrix<scalar_type, Dynamic, 1> data_vy = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+
+    size_t cpt = 0;
+    for (auto cl : msh)
+    {
+        auto cell_p = assembler.take_pressure(msh,cl,sol);
+        auto cell_v = assembler.take_velocity(msh,cl,sol);
+
+        data_p(cpt) = cell_p(0);
+        data_vx(cpt) = cell_v(0);
+        data_vy(cpt) = cell_v(1);
+
+        cpt++;
+    }
+    silo_db.add_variable("mesh", "pressure", data_p, disk::zonal_variable_t );
+    silo_db.add_variable("mesh", "vx", data_vx, disk::zonal_variable_t );
+    silo_db.add_variable("mesh", "vy", data_vy, disk::zonal_variable_t );
+    silo_db.close();
+
     // compute H^1 velocity error and L^2 pressure error
     auto err = compute_errors(msh, sol, hdi, velocity, pressure, assembler, false);
     std::cout << "velocity error = " << err.first << std::endl;
@@ -634,12 +681,20 @@ void convergence_test_typ1(void)
     bool use_sym_grad = true;
     std::vector<std::string> meshfiles;
 
+    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh1.geo2s");
+    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh2.geo2s");
+    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh3.geo2s");
+    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh4.geo2s");
+    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh5.geo2s");
+    meshfiles.push_back("../../../diskpp/meshes/gmsh/gmsh6.geo2s");
 
+    /*
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri05.mesh2d");
+    */
 
     /*
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_1.typ1");
@@ -677,9 +732,9 @@ void convergence_test_typ1(void)
         for (size_t i = 0; i < meshfiles.size(); i++)
         {
             // typedef disk::generic_mesh<T, 2>  mesh_type;
-            typedef disk::simplicial_mesh<T, 2>  mesh_type;
+            // typedef disk::simplicial_mesh<T, 2>  mesh_type;
 
-            mesh_type msh;
+            // mesh_type msh;
 
             /*
             disk::fvca5_mesh_loader<T, 2> loader;
@@ -690,8 +745,20 @@ void convergence_test_typ1(void)
             }
             loader.populate_mesh(msh);
             */
-
+            /*
             disk::netgen_mesh_loader<T, 2> loader;
+            if (!loader.read_mesh(meshfiles.at(i)))
+            {
+                std::cout << "Problem loading mesh." << std::endl;
+                continue;
+            }
+            loader.populate_mesh(msh);
+            */
+
+
+            disk::simplicial_mesh<T,2> msh;
+            disk::gmsh_geometry_loader< disk::simplicial_mesh<T,2> > loader;
+
             if (!loader.read_mesh(meshfiles.at(i)))
             {
                 std::cout << "Problem loading mesh." << std::endl;
@@ -747,12 +814,12 @@ void test_Neumann_meshes(const Mesh<T, 2, Storage>& msh) {
     auto zero = [](const disk::point<T, 2>& p) -> result_type { return result_type{0.0, 0}; };
 
     Bnd_type bnd(msh);
-    bnd.addDirichletBC(disk::DIRICHLET, 3, zero);
-    bnd.addDirichletBC(disk::DIRICHLET, 1, zero);
+    bnd.addDirichletBC(disk::DIRICHLET, 0, zero);
     // bnd.addDirichletBC(disk::DIRICHLET, 2, zero);
-    bnd.addNeumannBC(disk::NEUMANN, 2, zero);
-    bnd.addNeumannBC(disk::NEUMANN, 4, zero);
-    bnd.addNeumannBC(disk::NEUMANN, 0, zero);
+    // bnd.addDirichletBC(disk::DIRICHLET, 2, zero);
+    bnd.addNeumannBC(disk::NEUMANN, 1, zero);
+    // bnd.addNeumannBC(disk::NEUMANN, 3, zero);
+    // bnd.addNeumannBC(disk::NEUMANN, 0, zero);
 
     size_t num_all_faces = msh.faces_size();
     for (size_t i = 0; i < num_all_faces; i++)
@@ -789,15 +856,20 @@ void run_Neumann_tests(void)
     // auto msh = disk::load_netgen_2d_mesh<T>("../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
     // auto msh = disk::load_fvca5_2d_mesh<T>("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_1.typ1");
 
-    // disk::simplicial_mesh<T,2> msh;
+    disk::simplicial_mesh<T,2> msh;
     disk::gmsh_geometry_loader< disk::simplicial_mesh<T,2> > loader;
 
     // loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh1.geo2s");
-    // loader.populate_mesh(msh);
+    loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh2.geo2s");
+    // loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh3.geo2s");
+    // loader.read_mesh("../../../diskpp/meshes/gmsh/gmsh4.geo2s");
+    loader.populate_mesh(msh);
 
     std::cout << "mesh loaded !" << std::endl;
 
-    // test_Neumann_meshes(msh);
+    test_Neumann_meshes(msh);
+    run_interface(msh, 0);
+
 }
 
 
