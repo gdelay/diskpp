@@ -104,7 +104,8 @@ struct velocity_functor< Mesh<T, 2, Storage> >
         // ret(0) =  x2 * (x2 - 2. * x1 + 1.)  * y1 * (4. * y2 - 6. * y1 + 2.);
         // ret(1) = -y2 * (y2 - 2. * y1 + 1. ) * x1 * (4. * x2 - 6. * x1 + 2.);
 
-        ret(0) = 1000 * pt.y() * (1 - pt.y()) * 0.5 * 0.5;
+        // ret(0) = 1000 * pt.y() * (1 - pt.y()) * 0.5 * 0.5;
+        ret(0) = 0.;
         ret(1) = 0.;
 
         return ret;
@@ -132,7 +133,11 @@ struct pressure_functor< Mesh<T, 2, Storage> >
     scalar_type operator()(const point_type& pt) const
     {
         // return std::pow(pt.x(), 5.)  +  std::pow(pt.y(), 5.)  - 1./3.;
-        return 1000 * (2-pt.x()) * 0.5;
+        // return 1000 * (2-pt.x()) * 0.5;
+        if(pt.x() > 1.)
+            return 0.;
+        else
+            return 1000;
     }
 };
 
@@ -150,6 +155,7 @@ class interface_assembler
 {
     using T = typename Mesh::coordinate_type;
     typedef disk::vector_boundary_conditions<Mesh> boundary_type;
+    typedef typename Mesh::point_type  point_type;
 
     std::vector<size_t> compress_table;
 
@@ -160,6 +166,7 @@ class interface_assembler
     size_t num_all_faces, num_dirichlet_faces, num_other_faces;
     size_t cbs_A, cbs_B, fbs_A;
     size_t system_size;
+    size_t nb_pts; // number of interface points
 
     bool dirichlet_only;
 
@@ -200,7 +207,8 @@ public:
     SparseMatrix<T> LHS;
     vector_type     RHS;
 
-    interface_assembler(const Mesh& msh, const disk::hho_degree_info& hdi, const boundary_type& bnd)  : di(hdi), m_bnd(bnd)
+    interface_assembler(const Mesh& msh, const disk::hho_degree_info& hdi, const boundary_type& bnd,
+                        const size_t nb_pts)  : di(hdi), m_bnd(bnd), nb_pts(nb_pts)
     {
         auto is_dirichlet = [&](const typename Mesh::face& fc) -> bool {
                                 auto fc_id = msh.lookup(fc);
@@ -238,6 +246,9 @@ public:
         system_size = cbs_A * msh.cells_size() + fbs_A * num_other_faces + cbs_B * msh.cells_size();
         if(dirichlet_only)
             system_size++; // if only dirichlet BC : add the null mean pressure constraint
+
+        // add the Lagrange multipliers
+        system_size += 2*nb_pts;
 
         LHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
@@ -472,6 +483,103 @@ public:
         }
     }
 
+    // is_in : returns true if pt is in cl, false otherwise
+    // we assume that the cell is convex
+    // this is implemented for 2d applications only
+    bool
+    is_in(const Mesh& msh, const typename Mesh::cell_type& cl, const point_type& pt)
+    {
+        auto pts = points(msh,cl); // vertices of the cell
+
+        if(pts.size() != 3)
+        {
+            std::cerr << "the routine is_in works for triangles only" << std::endl;
+            return false;
+        }
+
+        bool isin = true;
+
+        T area;
+        { // signed area of the triangle
+            auto p0 = pts[0];
+            auto p1 = pts[1];
+            auto p2 = pts[2];
+
+            auto p0p1 = p1 - p0;
+            auto p0p2 = p2 - p0;
+
+            area = 0.5 * (p0p1.x() * p0p2.y() - p0p1.y() * p0p2.x());
+        }
+
+        for(size_t i=1; i<pts.size(); i++) // loop on the cell vertices
+        {
+            auto p0 = pts[i-1];
+            auto p1 = pts[i];
+
+            auto p0p1 = p1 - p0;
+            auto pp0 = p0 - pt;
+
+            auto lambda = 0.5*(pp0.x() * p0p1.y() - pp0.y() * p0p1.x()) / area; // barycentric coordinate
+            if(lambda < 0 && std::abs(lambda) > 1e-10) // this quantity is positive if pt is in cl
+                return false;
+        }
+        // a last iteration ...
+        {
+            auto p0 = pts[pts.size()-1];
+            auto p1 = pts[0];
+
+            auto p0p1 = p1 - p0;
+            auto pp0 = p0 - pt;
+
+            auto lambda = 0.5*(pp0.x() * p0p1.y() - pp0.y() * p0p1.x()) / area; // barycentric coordinate
+            if(lambda < 0 && std::abs(lambda) > 1e-10) // this vector product has to be positive
+                return false;
+        }
+        return true;
+    }
+
+    void
+    impose_interface_conditions(const Mesh& msh, vector_type x_pos, vector_type y_pos)
+    {
+        for(int pt_i=0; pt_i<x_pos.size(); pt_i++) // loop on the interface points
+        {
+            T x = x_pos(pt_i);
+            T y = y_pos(pt_i);
+
+            point_type pt(x,y);
+
+            // we find the cell containing this point
+            for (auto& cl : msh)
+            {
+                if( is_in(msh, cl, pt) )
+                {
+                    // we compute w_T(x_i) for every basis function w_T of cell T = cl
+                    auto cb = disk::make_vector_monomial_basis(msh, cl, di.cell_degree());
+                    Matrix<T, Dynamic, 2> c_phi = cb.eval_functions(pt);
+
+                    /* we add this contribution to the global matrix */
+                    auto cell_offset  = offset(msh, cl);
+                    size_t vel_offset = cell_offset * cbs_A;
+
+                    size_t mult_offset = cbs_A * msh.cells_size() + fbs_A * num_other_faces + cbs_B * msh.cells_size() + 2*pt_i;
+
+                    // add coefficients
+                    for(size_t i=0; i<2; i++)
+                    {
+                        size_t I = mult_offset + i; // global index
+                        for(size_t j=0; j<cbs_A; j++)
+                        {
+                            size_t J = vel_offset + j; // global index
+                            triplets.push_back( Triplet<T>( I, J, c_phi(j,i) ) );
+                            triplets.push_back( Triplet<T>( J, I, c_phi(j,i) ) );
+                        }
+                    }
+                    break; // if the point is on the boundary of a cell : we assign it to the first cell we found
+                }
+            }
+        }
+    }
+
     void finalize(void)
     {
         LHS.setFromTriplets(triplets.begin(), triplets.end());
@@ -482,9 +590,10 @@ public:
 
 template<typename Mesh, typename BoundaryType>
 auto
-make_interface_assembler(const Mesh& msh, disk::hho_degree_info hdi, const BoundaryType& bnd)
+make_interface_assembler(const Mesh& msh, disk::hho_degree_info hdi, const BoundaryType& bnd,
+    const size_t nb_pts)
 {
-    return interface_assembler<Mesh>(msh, hdi, bnd);
+    return interface_assembler<Mesh>(msh, hdi, bnd, nb_pts);
 }
 //////////////////////////////////////////////////////
 
@@ -580,6 +689,17 @@ run_interface(const Mesh& msh, size_t degree, size_t int_num)
 
     typedef disk::dynamic_matrix<scalar_type>     matrix_type;
 
+    // interface points
+    Matrix<scalar_type, Dynamic, 1> int_x = Matrix<scalar_type, Dynamic, 1>::Zero(int_num);
+    Matrix<scalar_type, Dynamic, 1> int_y = Matrix<scalar_type, Dynamic, 1>::Zero(int_num);
+
+    scalar_type hs = 1./(int_num-1);
+    for(int i=0; i<int_num; i++)
+    {
+        int_x(i) = 1.;
+        int_y(i) = i*hs;
+    }
+
     // exact solution and rhs function
     auto rhs_fun = make_rhs_function(msh);
     auto velocity = make_velocity_function(msh);
@@ -615,7 +735,7 @@ run_interface(const Mesh& msh, size_t degree, size_t int_num)
     }
 
     // assembler for the problem
-    auto assembler = make_interface_assembler(msh, hdi, bnd);
+    auto assembler = make_interface_assembler(msh, hdi, bnd, int_num);
 
     // assembly loop on the cells
     scalar_type factor = 1.; // used for symmetric gradient
@@ -630,6 +750,7 @@ run_interface(const Mesh& msh, size_t degree, size_t int_num)
         assembler.assemble(msh, cl, factor * (gr.second + stab), -dr, rhs);
     }
     assembler.impose_neumann_boundary_conditions(msh);
+    assembler.impose_interface_conditions(msh, int_x, int_y);
     assembler.finalize();
 
     size_t systsz = assembler.LHS.rows();
@@ -666,6 +787,18 @@ run_interface(const Mesh& msh, size_t degree, size_t int_num)
     silo_db.add_variable("mesh", "vy", data_vy, disk::zonal_variable_t );
     silo_db.close();
 
+    // export interface points
+    std::ofstream points_file("points_file.3D", std::ios::out | std::ios::trunc);
+    if( !(points_file) )
+        std::cerr << "file not opened !!" << std::endl;
+
+    points_file << "X   Y   Z   val" << std::endl;
+
+    for(int i=0; i<int_num; i++)
+        points_file << int_x(i) << "   " << int_y(i) << "   0.0     0.0" << std::endl;
+
+    points_file.close();
+
     // compute H^1 velocity error and L^2 pressure error
     auto err = compute_errors(msh, sol, hdi, velocity, pressure, assembler, false);
     std::cout << "velocity error = " << err.first << std::endl;
@@ -688,6 +821,9 @@ void convergence_test_typ1(void)
     meshfiles.push_back("../../../diskpp/apps/stokes/rectangle4.geo2s");
     meshfiles.push_back("../../../diskpp/apps/stokes/rectangle5.geo2s");
     meshfiles.push_back("../../../diskpp/apps/stokes/rectangle6.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle7.geo2s");
+    meshfiles.push_back("../../../diskpp/apps/stokes/rectangle8.geo2s");
+    // meshfiles.push_back("../../../diskpp/apps/stokes/rectangle9.geo2s");
 
     /*
     meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
@@ -723,16 +859,17 @@ void convergence_test_typ1(void)
     std::cout << "                   velocity H1-error";
     std::cout << "    -     pressure L2-error "<< std::endl;
 
-    for (size_t k = 0; k < 2; k++)
+    for (size_t k = 0; k < 1; k++)
     {
         std::cout << "DEGREE " << k << std::endl;
 
         std::vector<T> mesh_hs;
         std::vector<std::pair<T,T>> errors;
 
+        size_t nb_points = 40;
         for (size_t i = 0; i < meshfiles.size(); i++)
         {
-            size_t nb_points = 4*i;
+            nb_points *= 2;
             // typedef disk::generic_mesh<T, 2>  mesh_type;
             // typedef disk::simplicial_mesh<T, 2>  mesh_type;
 
