@@ -998,7 +998,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     for(int l = 0; l< time_degree; l++) dtl *= dt;
     for(int k=0; k < hdi.cell_degree(); k++) hk *= h_max;
 
-    T Tikhonov_coeff = dtl * dt / sqrt(h_min) + hk + dtl * sqrt(dt) + hk * h_max / sqrt(dt);
+    T Tikhonov_coeff = hk + dtl * sqrt(dt);
 
     tc.tic();
 
@@ -1020,7 +1020,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
         /* Primal - Primal */
         Matrix<T, Dynamic, Dynamic> PP = stab;
-        PP.block(0,0,cbs,cbs) += gamma * Tikhonov_coeff * mass.block(0,0,cbs,cbs);
+        PP.block(0,0,cbs,cbs) += gamma * Tikhonov_coeff * Tikhonov_coeff * mass.block(0,0,cbs,cbs);
         // add data assimilation term
         if( varpi_fun(barycenter(msh,cl)) > 0.5 )
         {
@@ -1231,7 +1231,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
 
             // T noise_size = 0.;
-            T noise_size = 0.001;
+            // T noise_size = 0.001;
+            T noise_size = 1.e-5;
 
             // heat equation RHS
             for(auto& qpt : qpst) // time integration
@@ -1563,7 +1564,7 @@ tests_auto_1d()
             file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
 
             // we test all the meshes in the list
-            size_t N = 8;
+            size_t N = 5;
             for(size_t i=0; i < nb_meshes; i++)
             {
                 N *= 2;
