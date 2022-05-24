@@ -7,7 +7,7 @@
  *  /_\/_\/_\/_\   methods.
  *
  * This file is copyright of the following authors:
- * Guillaume Delay  (C) 2021         guillaume.delay@sorbonne-universite.fr
+ * Guillaume Delay  (C) 2021, 2022         guillaume.delay@sorbonne-universite.fr
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -238,11 +238,11 @@ struct B_functor< Mesh<T, 2, Storage> >
         //     ( ((pt.x() >= 0.0) && (pt.x() <= 0.25)) || ((pt.x() >= 0.75) && (pt.x() <= 1.0)) );
         // bool Ndom3 = ((pt.x() >= 0.0) && (pt.x() <= 0.125) && (pt.y() >= 0.125)) ||
         //     ((pt.y() >= 0.875) && (pt.x() <= 0.875));
-        bool Ndom4 = !( (pt.x() >= 0.125) && (pt.x() <= 0.875) && (pt.y() <= 0.875) );
+        bool Ndom4 = (pt.x() >= 0.125) && (pt.x() <= 0.875) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
         if( Ndom4 )
-            ret = 0.0;
-        else
             ret = 1.0;
+        else
+            ret = 0.0;
 
         return ret;
     }
@@ -270,7 +270,7 @@ public:
 // B function for the time domain
 template<typename T>
 bool time_B(T time) {
-    T eps = 0.1;
+    T eps = 0.2;
     T fin_time = 2.;
 
     return ( eps < time ) && ( time < fin_time - eps );
@@ -1230,6 +1230,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
             auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
 
+            // T noise_size = 0.;
             T noise_size = 0.001;
 
             // heat equation RHS
@@ -1326,7 +1327,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     cout << "u.norm() = " << u.norm() << endl;
     
-    scalar_type t = 0.0;
+    scalar_type t = dt * 0.5; // middle of the current time cell
     // scalar_type dt = final_time/time_steps;
     scalar_type L2H1_error = 0.;
     scalar_type L2L2_error = 0.;
@@ -1334,7 +1335,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     scalar_type L2L2_B_error = 0.;
     scalar_type L2H1_z = 0.;
 
-    size_t freq_exp = 10000;
+    size_t freq_exp = 100000;
 
     /* Post-processing */
     // time loop
@@ -1454,7 +1455,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         t += dt;
     } // time loop
 
-    cout << "final time = " << t << endl;
+    cout << "final time = " << t - dt*0.5 << endl;
     std::cout << "L2-H1-error = " << std::sqrt(L2H1_error) << std::endl;
     std::cout << "L2-L2-error = " << std::sqrt(L2L2_error) << std::endl;
     std::cout << "L2-H1-B-error = " << std::sqrt(L2H1_B_error) << std::endl;
@@ -1595,6 +1596,7 @@ tests_auto_2d()
     typedef disk::simplicial_mesh<T, 2>  mesh_type;
 
     /*********************  REFINEMENT IN SPACE  **************************/
+    if(true)
     {
         // list of mesh files
         std::vector<std::string> meshes;
@@ -1611,14 +1613,14 @@ tests_auto_2d()
         files.push_back("./test_space_k2.txt");
         files.push_back("./test_space_k3.txt");
 
-        // we test space degree 1 only
-        for(int s_degree=1; s_degree < 2; s_degree++)
+        // we test space degree 1 and 2 only
+        for(int s_degree=1; s_degree <= 2; s_degree++)
         {
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
             size_t t_degree = 1;
-            size_t N = 32;
+            size_t N = 20;
 
             // open the output file
             std::ofstream file;
@@ -1653,8 +1655,9 @@ tests_auto_2d()
 
     }
     /*********************  REFINEMENT IN TIME  **************************/
+    if(true)
     {
-        size_t nb_meshes = 4;
+        size_t nb_meshes = 3;
 
         std::vector<std::string> files;
         files.push_back("./test_time_k0.txt");
@@ -1662,8 +1665,8 @@ tests_auto_2d()
         files.push_back("./test_time_k2.txt");
         files.push_back("./test_time_k3.txt");
 
-        // we test time degree 0 only
-        for(int t_degree=0; t_degree < 1; t_degree++)
+        // we test time degree 0 and 1 only
+        for(int t_degree=0; t_degree < 2; t_degree++)
         {
             std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
             std::cout << nocolor;
