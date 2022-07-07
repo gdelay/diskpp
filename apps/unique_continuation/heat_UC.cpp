@@ -39,6 +39,12 @@
 #include "colormanip.h"
 #include "bases/bases.hpp"
 
+#include <Eigen/IterativeLinearSolvers>
+#include <unsupported/Eigen/IterativeSolvers>
+#include "solvers/mumps.hpp"
+
+
+
 using namespace disk;
 using namespace Eigen;
 using namespace std;
@@ -62,7 +68,7 @@ struct rhs_functor< Mesh<T, 1, Storage> >
     {
         // return 0.0;
         // return M_PI*M_PI*std::sin( M_PI * pt.x() );
-        return ( M_PI*M_PI*std::cos(t) - std::sin(t) ) * std::sin( M_PI * pt.x() );
+        return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
     }
 };
 
@@ -76,7 +82,7 @@ struct rhs_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return ( 2*M_PI*M_PI*std::cos(t) - std::sin(t) ) * std::sin( M_PI * pt.x() )
+        return ( 2*M_PI*M_PI*std::cos(M_PI*t) - M_PI*std::sin(M_PI*t) ) * std::sin( M_PI * pt.x() )
             * std::sin( M_PI * pt.y() );
     }
 };
@@ -104,7 +110,7 @@ struct solution_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        return std::sin( M_PI * pt.x() ) * std::cos(t);
+        return std::sin( M_PI * pt.x() ) * std::cos(M_PI * t);
     }
 };
 
@@ -121,7 +127,7 @@ struct solution_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        return std::cos(t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+        return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
     }
 };
 
@@ -1318,13 +1324,69 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     /* Solving linear system */
     cout << "RHS.norm() = " << RHS.norm() << endl;
-    tc.tic();
+    // tc.tic();
     Matrix<scalar_type, Dynamic, 1> u;
-    disk::solvers::pardiso_params<scalar_type> pparams;
-    mkl_pardiso(pparams, LHS, RHS, u);
-    tc.toc();
+
+    if(true) {
+        tc.tic();
+        std::cout << "running Pardiso" << std::endl;
+        disk::solvers::pardiso_params<scalar_type> pparams;
+        mkl_pardiso(pparams, LHS, RHS, u);
+        tc.toc();
+        std::cout << " Pardiso Solving time: " << tc << std::endl;
+    }
+    if(false)
+    {
+        tc.tic();
+        std::cout << "running MINRES" << std::endl;
+        MINRES<SparseMatrix<scalar_type>> mr;
+        mr.compute(LHS);
+        u = mr.solve(RHS);
+        std::cout << "#iterations:     " << mr.iterations() << std::endl;
+        std::cout << "estimated error: " << mr.error()      << std::endl;
+
+        tc.toc();
+        std::cout << " MINRES Solving time: " << tc << std::endl;
+    }
+    if(false)
+    {
+        // JacobiSVD<SparseMatrix<scalar_type>> svd(LHS);
+        // scalar_type cond = svd.singularValues()(0)
+        //     / svd.singularValues()(svd.singularValues().size()-1);
+        // std::cout << "conditionning = " << cond << std::endl;
+
+        // std::cout << "test" << std::endl;
+
+        // const auto ev = SelfAdjointEigenSolver<SparseMatrix<scalar_type>>(LHS).eigenvalues();
+        // scalar_type cond = ev(ev.size() - 1) / ev(0);
+        // std::cout << "conditionning = " << cond << std::endl;
+
+        tc.tic();
+
+        std::cout << "running GMRES" << std::endl;
+        GMRES<SparseMatrix<scalar_type> > solver(LHS);
+        u = solver.solve(RHS);
+        std::cout << "#iterations:     " << solver.iterations() << std::endl;
+        std::cout << "estimated error: " << solver.error()      << std::endl;
+
+        tc.toc();
+        std::cout << " GMRES Solving time: " << tc << std::endl;
+    }
+    if(false)
+    {
+        tc.tic();
+        std::cout << "running MUMPS" << std::endl;
+
+        mumps_solver<scalar_type> mumps;
+        u = mumps.solve(LHS, RHS);
+
+        tc.toc();
+        std::cout << " MUMPS Solving time: " << tc << std::endl;
+    }
+
+    // tc.toc();
     
-    std::cout << " Solving time: " << tc << std::endl;
+    // std::cout << " Solving time: " << tc << std::endl;
 
     cout << "u.norm() = " << u.norm() << endl;
     
@@ -1546,7 +1608,7 @@ tests_auto_1d()
         files.push_back("./test_time_k3.txt");
 
         // we test time degrees from 1 to 3
-        for(int t_degree=1; t_degree < 4; t_degree++)
+        for(int t_degree=0; t_degree < 4; t_degree++)
         {
             std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
             std::cout << nocolor;
@@ -1620,8 +1682,8 @@ tests_auto_2d()
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 1;
-            size_t N = 20;
+            size_t t_degree = 2;
+            size_t N = 10;
 
             // open the output file
             std::ofstream file;
@@ -1684,10 +1746,9 @@ tests_auto_2d()
             file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
 
             // we test all the meshes in the list
-            size_t N = 2;
+            size_t N = 5;
             for(size_t i=0; i < nb_meshes; i++)
             {
-                N *= 2;
                 mesh_type msh;
                 disk::netgen_mesh_loader<T, 2> loader;
                 if( !loader.read_mesh("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d") )
@@ -1701,6 +1762,7 @@ tests_auto_2d()
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
                      << std::endl;
+                N *= 2;
             }
 
             // close the file
