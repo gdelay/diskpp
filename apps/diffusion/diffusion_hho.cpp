@@ -14,6 +14,8 @@
 #include "solvers/solver.hpp"
 
 #include "../tests/common.hpp"
+// #include "../../contrib/solver_wrappers/mumps/mumps.hpp"
+#include "../maxwell/mumps_new.hpp"
 
 /***************************************************************************/
 /* RHS definition */
@@ -164,10 +166,23 @@ run_hho_diffusion_solver(const Mesh& msh, size_t degree, const bool statcond, co
 
     disk::dynamic_vector<T> sol = disk::dynamic_vector<T>::Zero(systsz);
 
-    std::cout << "Running pardiso" << std::endl;
-    disk::solvers::pardiso_params<T> pparams;
-    pparams.report_factorization_Mflops = true;
-    mkl_pardiso(pparams, assembler.LHS, assembler.RHS, sol);
+    if(false)
+    {
+        std::cout << "Running pardiso" << std::endl;
+        disk::solvers::pardiso_params<T> pparams;
+        pparams.report_factorization_Mflops = true;
+        mkl_pardiso(pparams, assembler.LHS, assembler.RHS, sol);
+    }
+    else
+    {
+        std::cout << "Running MUMPS" << std::endl;
+        // mumps_solver<T> mumps;
+        // sol = mumps.solve(assembler.LHS, assembler.RHS);
+
+        mumps_solver<T> solver;
+        solver.factorize(assembler.LHS);
+        sol = mumps(assembler.LHS, assembler.RHS);
+    }
 
     T error = 0.0;
 
