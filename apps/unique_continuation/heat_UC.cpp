@@ -265,12 +265,13 @@ auto make_B_function(const Mesh& msh)
 template<typename T>
 class test_info {
 public:
-    test_info() : H1_Om(0.) , L2_Om(0.) , H1_B(0.) , L2_B(0.) , H1_z(0.) {}
+    test_info() : H1_Om(0.) , L2_Om(0.) , H1_B(0.) , L2_B(0.) , H1_z(0.), nb_dof(0) {}
     T H1_Om; // H1-error in Omega
     T L2_Om; // L2-error in Omega
     T H1_B; // H1-error in B
     T L2_B; // L2-error in B
     T H1_z; // H1-error for the dual variable
+    size_t nb_dof; // number of degrees of freedom
 };
 
 // B function for the time domain
@@ -1526,6 +1527,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     std::cout << "L2-H1-z-norm = " << std::sqrt(L2H1_z) << std::endl;
 
     test_info<double> TI;
+    TI.nb_dof = LHS.rows();
     TI.H1_Om = std::sqrt(L2H1_error);
     TI.L2_Om = std::sqrt(L2L2_error);
     TI.H1_B = std::sqrt(L2H1_B_error);
@@ -1571,7 +1573,7 @@ tests_auto_1d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
 
             // we test all the meshes in the list
             size_t num_elems = 8;
@@ -1589,6 +1591,7 @@ tests_auto_1d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << "\t" << TI.nb_dof
                      << std::endl;
             }
 
@@ -1623,7 +1626,7 @@ tests_auto_1d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
 
             // we test all the meshes in the list
             size_t N = 5;
@@ -1641,6 +1644,7 @@ tests_auto_1d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << "\t" << TI.nb_dof
                      << std::endl;
             }
 
