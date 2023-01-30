@@ -7,7 +7,7 @@
  *  /_\/_\/_\/_\   methods.
  *
  * This file is copyright of the following authors:
- * Guillaume Delay  (C) 2021, 2022         guillaume.delay@sorbonne-universite.fr
+ * Guillaume Delay  (C) 2021-2023          guillaume.delay@sorbonne-universite.fr
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -1607,7 +1607,7 @@ tests_auto_1d()
         files.push_back("./test_time_k2.txt");
         files.push_back("./test_time_k3.txt");
 
-        // we test time degrees from 1 to 3
+        // we test time degrees from 0 to 3
         for(int t_degree=0; t_degree < 4; t_degree++)
         {
             std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
@@ -1663,9 +1663,15 @@ tests_auto_2d()
     {
         // list of mesh files
         std::vector<std::string> meshes;
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
-        meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
+        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
+        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
+        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
+        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
+
+        meshes.push_back("test2d_1.geo");
+        meshes.push_back("test2d_2.geo");
+        meshes.push_back("test2d_3.geo");
+        meshes.push_back("test2d_4.geo");
 
         size_t nb_meshes = meshes.size();
 
@@ -1698,7 +1704,10 @@ tests_auto_2d()
             for(size_t i=0; i < nb_meshes; i++)
             {
                 mesh_type msh;
-                disk::netgen_mesh_loader<T, 2> loader;
+
+                // disk::netgen_mesh_loader<T, 2> loader;
+                disk::gmsh_geometry_loader< mesh_type > loader;
+
                 if( !loader.read_mesh(meshes.at(i)) )
                     std::cout << "error loading mesh !" << std::endl;
                 loader.populate_mesh(msh);
@@ -1750,9 +1759,15 @@ tests_auto_2d()
             for(size_t i=0; i < nb_meshes; i++)
             {
                 mesh_type msh;
-                disk::netgen_mesh_loader<T, 2> loader;
-                if( !loader.read_mesh("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d") )
+
+                // disk::netgen_mesh_loader<T, 2> loader;
+                // if( !loader.read_mesh("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d") )
+                //     std::cout << "error loading mesh !" << std::endl;
+
+                disk::gmsh_geometry_loader< mesh_type > loader;
+                if( !loader.read_mesh("test2d_3.geo") )
                     std::cout << "error loading mesh !" << std::endl;
+
                 loader.populate_mesh(msh);
 
                 // test this mesh
@@ -1776,8 +1791,8 @@ tests_auto_2d()
 */
 int main(int argc, char **argv)
 {
-    tests_auto_1d<double>();
-    // tests_auto_2d<double>();
+    // tests_auto_1d<double>();
+    tests_auto_2d<double>();
     return 0;
 }
 
