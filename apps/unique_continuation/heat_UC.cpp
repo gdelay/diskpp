@@ -1702,7 +1702,7 @@ tests_auto_2d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
 
             // we test all the meshes in the list
             for(size_t i=0; i < nb_meshes; i++)
@@ -1722,6 +1722,7 @@ tests_auto_2d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << "\t" << TI.nb_dof
                      << std::endl;
             }
 
@@ -1756,7 +1757,7 @@ tests_auto_2d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
 
             // we test all the meshes in the list
             size_t N = 5;
@@ -1780,6 +1781,7 @@ tests_auto_2d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << "\t" << TI.nb_dof
                      << std::endl;
                 N *= 2;
             }
