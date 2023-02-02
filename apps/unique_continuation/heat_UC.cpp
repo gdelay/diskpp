@@ -331,6 +331,9 @@ class heat_UC_assembler
         }
     };
 
+    // list of boundaries that are not actual boundaries (has to be updated according to the considred mesh)
+    const vector<int> not_bnd;
+
   public:
     typedef dynamic_matrix<T> matrix_type;
     typedef dynamic_vector<T> vector_type;
@@ -340,9 +343,17 @@ class heat_UC_assembler
 
     // BC_known : true if we know the Dirichlet values of the solution, false otherwise
     heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
-	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(BC_known)
+	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(BC_known), not_bnd({6,7,8,9,10,11})
     {
-	auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
+        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
+                                if( !msh.is_boundary(fc) )
+                                    return false;
+                                auto bnd_id = msh.boundary_id(fc);
+                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
+                                    if(bnd_id == *it)
+                                        return false;
+                                return true;
+                                    };
 
         num_all_faces       = msh.faces_size();
         num_dirichlet_faces = std::count_if(msh.faces_begin(), msh.faces_end(), is_dirichlet);
@@ -388,7 +399,15 @@ class heat_UC_assembler
              const matrix_type&              lhs,
              const vector_type&              rhs)
     {
-	auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
+        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
+                                if( !msh.is_boundary(fc) )
+                                    return false;
+                                auto bnd_id = msh.boundary_id(fc);
+                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
+                                    if(bnd_id == *it)
+                                        return false;
+                                return true;
+                            };
 
         const auto fbs    = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
         const auto cbs    = scalar_basis_size(di.cell_degree(), Mesh::dimension);
@@ -567,6 +586,15 @@ class heat_UC_assembler
         ret.block(0, 0, (time_degree+1)*cbs, 1)
             = solution.block(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
 
+        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
+                                if( !msh.is_boundary(fc) )
+                                    return false;
+                                auto bnd_id = msh.boundary_id(fc);
+                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
+                                    if(bnd_id == *it)
+                                        return false;
+                                return true;
+                            };
 
         // primal variable : face components
         for (size_t face_i = 0; face_i < num_faces; face_i++)
@@ -587,8 +615,6 @@ class heat_UC_assembler
             if(BC_known) face_LHS_offset += compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // compress table
             else face_LHS_offset += face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
 
-
-            auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
 
             const bool dirichlet = is_dirichlet(fc);
 
@@ -612,8 +638,6 @@ class heat_UC_assembler
         for (size_t face_i = 0; face_i < num_faces; face_i++)
         {
             const auto fc = fcs[face_i];
-
-            auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool { return msh.is_boundary(fc); };
 
             const bool dirichlet = is_dirichlet(fc);
 
