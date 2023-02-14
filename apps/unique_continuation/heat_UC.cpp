@@ -51,6 +51,90 @@ using namespace std;
 
 
 
+///////////////   noise representation /////////////
+// the time-space geometry is divided in sub-domains (M sub-domains along each dimension)
+// the space domain is necesseraly \Omega = [0,1]^d
+// a noise value is affected to each sub-domain (strored in tab)
+template<typename Mesh>
+class noise_representation;
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+class noise_representation< Mesh<T, 1, Storage> >
+{
+private:
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    size_t M;                     // number of domain sub-divisions along each dimension
+    std::vector<scalar_type> tab; // tabular for the noise level in each sub-division
+
+public:
+    noise_representation(size_t M, scalar_type noise_size) : M(M)
+    {
+        size_t M_tot = pow(M,2); // total number of sub-divisions
+        tab.reserve(M_tot);
+
+        // we need to compute the noise for each sub-division
+        for(int i=0; i<M_tot; i++)
+            tab.push_back( noise_size * ((std::rand() % 200)-100) * 0.01 );
+    }
+    scalar_type operator()(const scalar_type t, const point_type& pt) const
+    {
+        scalar_type x = pt.x();
+        assert(0 <= x && x <= 1);
+        assert(0 <= t && t <= 2);
+
+        size_t x_pos = x * M;
+        size_t t_pos = (t/2.) * M;
+        assert(x_pos < M && t_pos < M);
+
+        return tab[t_pos*M + x_pos];
+    }
+};
+
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+class noise_representation< Mesh<T, 2, Storage> >
+{
+private:
+    typedef Mesh<T,2,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    size_t M;                     // number of domain sub-divisions along each dimension
+    std::vector<scalar_type> tab; // tabular for the noise level in each sub-division
+
+public:
+    noise_representation(size_t M, scalar_type noise_size) : M(M)
+    {
+        size_t M_tot = pow(M,3); // total number of sub-divisions
+        tab.reserve(M_tot);
+
+        // we need to compute the noise for each sub-division
+        for(int i=0; i<M_tot; i++)
+            tab.push_back( noise_size * ((std::rand() % 200)-100) * 0.01 );
+    }
+    scalar_type operator()(const scalar_type t, const point_type& pt) const
+    {
+        scalar_type x = pt.x(), y = pt.y();
+        assert(0 <= x && x <= 1);
+        assert(0 <= y && y <= 1);
+        assert(0 <= t && t <= 2);
+
+        size_t x_pos = x * M;
+        size_t y_pos = y * M;
+        size_t t_pos = (t/2.) * M;
+        assert(x_pos < M && y_pos < M && t_pos < M);
+
+        return tab[t_pos*M*M + x_pos*M + y_pos];
+    }
+};
+
+template<typename Mesh>
+auto make_noise_representation(const Mesh& msh, size_t M, typename Mesh::coordinate_type noise_level)
+{
+    return noise_representation<Mesh>(M, noise_level);
+}
+
 //////////////////   test case   ///////////////////
 /* RHS definition */
 template<typename Mesh>
@@ -934,9 +1018,9 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 
 ///////////////////////////////////////////////
 
-template<typename Mesh>
+template<typename Mesh, typename NR>
 test_info<typename Mesh::coordinate_type>
-UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree)
+UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree, NR noise_fct)
 {
     typedef typename Mesh::coordinate_type  scalar_type;
     typedef typename Mesh::point_type       point_type;
@@ -1305,7 +1389,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                     {
                         auto x_phi   = cb.eval_functions( qp.point() );
 
-                        T noise = noise_size * ((std::rand() % 200)-100) * 0.01;
+                        T noise = noise_fct( time_point , qp.point() );
+                        // T noise = noise_size * ((std::rand() % 200)-100) * 0.01;
                         // T noise = 0.0;
                         T noised_data = sol_fun( time_point , qp.point() ) + noise;
 
@@ -1569,6 +1654,15 @@ tests_auto_1d()
 {
     typedef disk::generic_mesh<T, 1>  mesh_type;
 
+
+    // T noise_size = 1.e-3;
+    // T noise_size = 1.e-5;
+    T noise_size = 0.;
+    size_t nb_noise_subdiv = 10;
+    mesh_type test_mesh;
+
+    auto noise_fct = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size);
+
     /*********************  REFINEMENT IN SPACE  **************************/
     if(true)
     {
@@ -1611,7 +1705,7 @@ tests_auto_1d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
+                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -1665,7 +1759,7 @@ tests_auto_1d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
+                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -1699,6 +1793,14 @@ tests_auto_2d()
     meshes.push_back("test2d_2.geo");
     meshes.push_back("test2d_3.geo");
     meshes.push_back("test2d_4.geo");
+
+    // T noise_size = 1.e-3;
+    // T noise_size = 1.e-5;
+    T noise_size = 0.;
+    size_t nb_noise_subdiv = 10;
+    mesh_type test_mesh;
+
+    auto noise_fct = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size);
 
 
     /*********************  REFINEMENT IN SPACE  **************************/
@@ -1744,7 +1846,7 @@ tests_auto_2d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
+                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -1802,7 +1904,7 @@ tests_auto_2d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree);
+                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
