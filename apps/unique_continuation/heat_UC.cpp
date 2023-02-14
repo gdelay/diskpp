@@ -1570,6 +1570,7 @@ tests_auto_1d()
     typedef disk::generic_mesh<T, 1>  mesh_type;
 
     /*********************  REFINEMENT IN SPACE  **************************/
+    if(true)
     {
         size_t nb_meshes = 4;
 
@@ -1625,6 +1626,7 @@ tests_auto_1d()
 
     }
     /*********************  REFINEMENT IN TIME  **************************/
+    if(true)
     {
         size_t nb_meshes = 4;
 
@@ -1650,7 +1652,7 @@ tests_auto_1d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof\tN" << std::endl;
 
             // we test all the meshes in the list
             size_t N = 5;
@@ -1668,7 +1670,7 @@ tests_auto_1d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
-                     << "\t" << TI.nb_dof
+                     << "\t" << TI.nb_dof << "\t" << N
                      << std::endl;
             }
 
@@ -1686,21 +1688,22 @@ tests_auto_2d()
 {
     typedef disk::simplicial_mesh<T, 2>  mesh_type;
 
+    // list of mesh files
+    std::vector<std::string> meshes;
+    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
+    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
+    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
+    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
+
+    meshes.push_back("test2d_1.geo");
+    meshes.push_back("test2d_2.geo");
+    meshes.push_back("test2d_3.geo");
+    meshes.push_back("test2d_4.geo");
+
+
     /*********************  REFINEMENT IN SPACE  **************************/
     if(true)
     {
-        // list of mesh files
-        std::vector<std::string> meshes;
-        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
-        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
-        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
-        // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
-
-        meshes.push_back("test2d_1.geo");
-        meshes.push_back("test2d_2.geo");
-        meshes.push_back("test2d_3.geo");
-        meshes.push_back("test2d_4.geo");
-
         size_t nb_meshes = meshes.size();
 
         // list of export files
@@ -1716,8 +1719,8 @@ tests_auto_2d()
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 2;
-            size_t N = 10;
+            size_t t_degree = 1;
+            size_t N = 20;
 
             // open the output file
             std::ofstream file;
@@ -1758,7 +1761,8 @@ tests_auto_2d()
     /*********************  REFINEMENT IN TIME  **************************/
     if(true)
     {
-        size_t nb_meshes = 3;
+        size_t nb_meshes = 5;
+        size_t time_meshes[] = {5,10,15,20,30};
 
         std::vector<std::string> files;
         files.push_back("./test_time_k0.txt");
@@ -1781,22 +1785,20 @@ tests_auto_2d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof\tN" << std::endl;
 
             // we test all the meshes in the list
-            size_t N = 5;
             for(size_t i=0; i < nb_meshes; i++)
             {
                 mesh_type msh;
+                size_t N = time_meshes[i];
 
                 // disk::netgen_mesh_loader<T, 2> loader;
-                // if( !loader.read_mesh("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d") )
-                //     std::cout << "error loading mesh !" << std::endl;
-
                 disk::gmsh_geometry_loader< mesh_type > loader;
-                if( !loader.read_mesh("test2d_3.geo") )
-                    std::cout << "error loading mesh !" << std::endl;
 
+
+                if( !loader.read_mesh(meshes.at(2)) )
+                    std::cout << "error loading mesh !" << std::endl;
                 loader.populate_mesh(msh);
 
                 // test this mesh
@@ -1805,9 +1807,8 @@ tests_auto_2d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
-                     << "\t" << TI.nb_dof
+                     << "\t" << TI.nb_dof << "\t" << N
                      << std::endl;
-                N *= 2;
             }
 
             // close the file
