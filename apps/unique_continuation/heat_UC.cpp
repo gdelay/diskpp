@@ -135,6 +135,64 @@ auto make_noise_representation(const Mesh& msh, size_t M, typename Mesh::coordin
     return noise_representation<Mesh>(M, noise_level);
 }
 
+/////////////////   noise file    //////////////////
+template<size_t>
+string init_noise_file();
+
+template<> // dim = 1
+string init_noise_file<1>()
+{
+    return "#x\tt\tnoise";
+}
+
+template<> // dim = 2
+string init_noise_file<2>()
+{
+    return "#x\ty\tt\tnoise";
+}
+
+
+template<typename Mesh>
+class line_noise_file;
+
+// dim = 1
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+class line_noise_file< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+public:
+    std::string operator() (scalar_type t, const point_type& pt, scalar_type noise) {
+        std::stringstream ss_noise;
+        ss_noise << pt.x() << "\t" << t << "\t" << noise;
+        return ss_noise.str();
+    }
+};
+
+// dim = 2
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+class line_noise_file< Mesh<T, 2, Storage> >
+{
+    typedef Mesh<T,2,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+public:
+    std::string operator() (scalar_type t, const point_type& pt, scalar_type noise)
+    {
+        std::stringstream ss_noise;
+        ss_noise << pt.x() << "\t" << pt.y() << "\t" << t << "\t" << noise;
+        return ss_noise.str();
+    }
+};
+
+template<typename Mesh>
+auto make_line_noise_file(const Mesh& msh)
+{
+    return line_noise_file<Mesh>();
+}
+
+
 //////////////////   test case   ///////////////////
 /* RHS definition */
 template<typename Mesh>
@@ -1033,6 +1091,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
 
+    const bool EXPORT_NOISE = false;
+
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
     auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
 
@@ -1116,6 +1176,19 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     T Tikhonov_coeff = hk + dtl * sqrt(dt);
 
     tc.tic();
+
+    // export the noise values for visualization purposes
+    auto LNF = make_line_noise_file(msh);
+    std::ofstream noise_file;
+    if(EXPORT_NOISE)
+    {
+        std::stringstream ss_noise;
+        ss_noise << "noise_k" << degree << "_l" << time_degree << "_h" << msh.cells_size() << "_N" << time_steps;
+        noise_file.open (ss_noise.str(), std::ios::in | std::ios::trunc);
+        if (!noise_file.is_open())
+            throw std::logic_error("file not open");
+        noise_file << init_noise_file<Mesh::dimension>() << std::endl;
+    }
 
     cout << "start assembly" << endl;
     for (auto& cl : msh)
@@ -1394,6 +1467,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                         // T noise = 0.0;
                         T noised_data = sol_fun( time_point , qp.point() ) + noise;
 
+                        // export noise level
+                        if(EXPORT_NOISE)
+                            noise_file << LNF(time_point, qp.point(), noise) << std::endl;
+
                         for(size_t l1 = 0; l1 <= time_degree; l1++)
                         {
                             data_rhs.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * noised_data * x_phi;
@@ -1414,6 +1491,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     }
     cout << "end assembly loop" << endl;
+
+    // close the noise file
+    if(EXPORT_NOISE)
+        noise_file.close();
 
     cout << "LHS.rows() = " << assembler.LHS.rows() << "  "
          << "LHS.cols() = " << assembler.LHS.cols() << endl;
