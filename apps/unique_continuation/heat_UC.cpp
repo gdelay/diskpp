@@ -1773,7 +1773,7 @@ tests_auto_1d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof\th" << std::endl;
 
             // we test all the meshes in the list
             size_t num_elems = 8;
@@ -1788,10 +1788,12 @@ tests_auto_1d()
                 // test this mesh
                 auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
+                auto diam = average_diameter(msh);
+
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
-                     << "\t" << TI.nb_dof
+                     << "\t" << TI.nb_dof << "\t" << diam
                      << std::endl;
             }
 
@@ -1871,8 +1873,11 @@ tests_auto_2d()
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
 
     meshes.push_back("test2d_1.geo");
+    meshes.push_back("test2d_1_5.geo");
     meshes.push_back("test2d_2.geo");
+    meshes.push_back("test2d_2_5.geo");
     meshes.push_back("test2d_3.geo");
+    meshes.push_back("test2d_3_5.geo");
     meshes.push_back("test2d_4.geo");
 
     // T noise_size = 1.e-3;
@@ -1912,7 +1917,7 @@ tests_auto_2d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof\th" << std::endl;
 
             // we test all the meshes in the list
             for(size_t i=0; i < nb_meshes; i++)
@@ -1929,10 +1934,12 @@ tests_auto_2d()
                 // test this mesh
                 auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
+                auto diam = average_diameter(msh);
+
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
-                     << "\t" << TI.nb_dof
+                     << "\t" << TI.nb_dof << "\t" << diam
                      << std::endl;
             }
 
@@ -1980,7 +1987,7 @@ tests_auto_2d()
                 disk::gmsh_geometry_loader< mesh_type > loader;
 
 
-                if( !loader.read_mesh(meshes.at(2)) )
+                if( !loader.read_mesh(meshes.at(5)) )
                     std::cout << "error loading mesh !" << std::endl;
                 loader.populate_mesh(msh);
 
