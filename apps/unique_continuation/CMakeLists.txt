@@ -11,4 +11,6 @@ if (BUILD_APP_UC)
 
   add_executable(heat_UC heat_UC.cpp)
   target_link_libraries(heat_UC ${LINK_LIBS})
+  add_executable(wave_UC wave_UC.cpp)
+  target_link_libraries(wave_UC ${LINK_LIBS})
 endif ()
