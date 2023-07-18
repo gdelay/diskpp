@@ -1203,7 +1203,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
         size_t loc_size = 2*ah.cols()*(time_degree+1);
 
-        /*** Matrix lhs for the terms contained in a cell an a time step ***/
+        /*** Matrix lhs for the terms contained in a cell and a time step ***/
         Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
 
         /* Primal - Primal */
@@ -1214,8 +1214,6 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         {
             // cout << "enter cell with data" << "..." << endl;
             PP.block(0,0,cbs,cbs) += mass;
-
-            // TODO : add rhs
         }
 
         // fill lhs with the tensor product between time and space
@@ -1242,7 +1240,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 		    for(size_t face_j = 0; face_j < num_faces; face_j++)
                         lhs.block(cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs,
                                   cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs,
-                                  fbs, fbs) = PP.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs*num_faces) * time_mass(l1,l2);
+                                  fbs, fbs) = PP.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
 
         /* Primal - Dual */
@@ -1293,7 +1291,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
         /* Dual - Dual */
         Matrix<T, Dynamic, Dynamic> sigma = stab;
-        sigma.block(0,0,cbs,cbs) += mass;
+        // sigma.block(0,0,cbs,cbs) += mass;
 
         auto qps = integrate( msh, cl, 2*hdi.cell_degree() );
         for (auto& qp : qps)
@@ -2012,8 +2010,8 @@ tests_auto_2d()
 */
 int main(int argc, char **argv)
 {
-    // tests_auto_1d<double>();
-    tests_auto_2d<double>();
+    tests_auto_1d<double>();
+    // tests_auto_2d<double>();
     return 0;
 }
 
