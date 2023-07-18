@@ -208,9 +208,9 @@ struct rhs_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        // return 0.0;
+        return 0.0;
         // return M_PI*M_PI*std::sin( M_PI * pt.x() );
-        return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
+        // return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
     }
 };
 
@@ -224,8 +224,7 @@ struct rhs_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return ( 2*M_PI*M_PI*std::cos(M_PI*t) - M_PI*std::sin(M_PI*t) ) * std::sin( M_PI * pt.x() )
-            * std::sin( M_PI * pt.y() );
+        return M_PI * M_PI * std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
     }
 };
 
@@ -1368,7 +1367,7 @@ export_to_silo(const Mesh<T, 2, Storage>& msh,
     disk::silo_database silo;
 
     if (cycle == -1)
-        silo.create("UC_heat.silo");
+        silo.create("UC_wave.silo");
     else
     {
         std::stringstream ss;
@@ -1519,7 +1518,7 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 
 template<typename Mesh, typename NR>
 test_info<typename Mesh::coordinate_type>
-UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree, NR noise_fct)
+UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree, NR noise_fct)
 {
     typedef typename Mesh::coordinate_type  scalar_type;
     typedef typename Mesh::point_type       point_type;
@@ -1530,7 +1529,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto num_cells = msh.cells_size();
     auto nb_tot_faces = msh.faces_size();
 
-    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
+    auto assembler = make_wave_UC_assembler(msh, hdi, time_degree, time_steps, true);
 
     const bool EXPORT_NOISE = false;
 
@@ -1554,52 +1553,6 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     disk::uniform_mesh_loader<T, 1> time_loader(0, final_time, time_steps);
     time_loader.populate_mesh(time_mesh);
 
-    auto time_cell = *time_mesh.cells_begin();
-    auto next_time_cell = *(++time_mesh.cells_begin());
-
-    auto time_cb = make_scalar_monomial_basis(time_mesh, time_cell, time_degree);
-    auto time_cb_next = make_scalar_monomial_basis(time_mesh, next_time_cell, time_degree);
-    auto time_mass = make_mass_matrix(time_mesh, time_cell, time_cb);
-
-    ////// time derivative term
-    Matrix<T, Dynamic, Dynamic> time_deriv = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
-    auto qps_t = integrate(time_mesh, time_cell, 2*time_degree);
-    for (auto& qp : qps_t)
-    {
-        auto phi   = time_cb.eval_functions( qp.point() );
-        auto phi_t = time_cb.eval_gradients( qp.point() );
-        time_deriv += qp.weight() * phi * phi_t.transpose();
-    }
-    
-    ////// 1st jump term
-    Matrix<T, Dynamic, Dynamic> time_loc = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
-    auto t_fcs = faces(time_mesh, time_cell);
-    auto qps_f_t = integrate(time_mesh, t_fcs[0], 2*time_degree);
-    for (auto& qp : qps_f_t)
-    {
-        auto phi   = time_cb.eval_functions( qp.point() );
-        time_loc += qp.weight() * phi * phi.transpose();
-    }
-
-    ////// 2nd jump term
-    Matrix<T, Dynamic, Dynamic> time_loc_bis = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
-    auto qps_f_t_bis = integrate(time_mesh, t_fcs[1], 2*time_degree);
-    for (auto& qp : qps_f_t_bis)
-    {
-        auto phi_prev   = time_cb.eval_functions( qp.point() );
-        time_loc_bis += qp.weight() * phi_prev * phi_prev.transpose();
-    }
-
-    ////// 3rd jump term
-    Matrix<T, Dynamic, Dynamic> time_loc_cross = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
-    auto qps_f_t_cross = integrate(time_mesh, t_fcs[1], 2*time_degree);
-    for (auto& qp : qps_f_t_cross)
-    {
-        auto phi_prev   = time_cb.eval_functions( qp.point() );
-        auto phi_next   = time_cb_next.eval_functions( qp.point() );
-        time_loc_cross += qp.weight() * phi_prev * phi_next.transpose();
-    }
-
     // min and max h_T
     T h_min = 1000, h_max = 0;
     for (auto& cl : msh)
@@ -1609,12 +1562,12 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         if(hT > h_max) h_max = hT;
     }
 
-    T gamma = 1.e-3;  // Tikhonov coefficient
+    T gamma = 0;  // Tikhonov coefficient
     T dtl = 1., hk = 1.;
     for(int l = 0; l< time_degree; l++) dtl *= dt;
     for(int k=0; k < hdi.cell_degree(); k++) hk *= h_max;
 
-    T Tikhonov_coeff = hk + dtl * sqrt(dt);
+    T Tikhonov_coeff = hk + dtl;
 
     tc.tic();
 
@@ -1631,6 +1584,25 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         noise_file << init_noise_file<Mesh::dimension>() << std::endl;
     }
 
+    auto time_cell = *time_mesh.cells_begin();
+    auto time_cb = make_scalar_monomial_basis(time_mesh, time_cell, time_degree);
+    auto time_mass = make_mass_matrix(time_mesh, time_cell, time_cb);
+
+
+    // time diffusion term
+    hho_degree_info time_hdi(time_degree, time_degree, time_degree);
+    auto at = make_DGH_laplacian(time_mesh, time_cell, time_hdi);
+
+    // time stabilization terms
+    auto time_stab = make_no_proj_stabilization(time_mesh, time_cell, time_hdi);
+    auto time_sigma = time_stab;
+    auto t_qps = integrate( time_mesh, time_cell, 2*time_degree );
+    for (auto& qp : t_qps)
+    {
+        auto t_g_phi = time_cb.eval_gradients( qp.point() );
+        time_sigma.block(0,0,time_degree+1,time_degree+1) += qp.weight() * t_g_phi * t_g_phi.transpose();
+    }
+
     cout << "start assembly" << endl;
     for (auto& cl : msh)
     {
@@ -1642,9 +1614,9 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         auto mass   = make_mass_matrix(msh, cl, cb);
         auto stiff   = make_stiffness_matrix(msh, cl, cb);
 
-        size_t loc_size = 2*ah.cols()*(time_degree+1);
+        size_t loc_size = 2*ah.cols()*(time_degree+1)+ 2 * 2 * cbs;
 
-        /*** Matrix lhs for the terms contained in a cell an a time step ***/
+        /*** Matrix lhs for the terms contained in a cell and a time step ***/
         Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
 
         /* Primal - Primal */
@@ -1653,13 +1625,11 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         // add data assimilation term
         if( varpi_fun(barycenter(msh,cl)) > 0.5 )
         {
-            // cout << "enter cell with data" << "..." << endl;
             PP.block(0,0,cbs,cbs) += mass;
-
-            // TODO : add rhs
         }
 
         // fill lhs with the tensor product between time and space
+        // space stabilization
         // cell - cell
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
@@ -1683,13 +1653,44 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 		    for(size_t face_j = 0; face_j < num_faces; face_j++)
                         lhs.block(cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs,
                                   cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs,
-                                  fbs, fbs) = PP.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs*num_faces) * time_mass(l1,l2);
+                                  fbs, fbs) = PP.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
+        /* time stabilization */
+        // cell - cell
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                lhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass * time_stab(l1,l2);
+
+        // cell - face
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+        {
+            // previous time interface
+            lhs.block(l1*cbs, ah.cols()*(time_degree+1), cbs, cbs) += mass * time_stab(l1,time_degree+1);
+            // next time interface
+            lhs.block(l1*cbs, ah.cols()*(time_degree+1) + cbs, cbs, cbs) += mass * time_stab(l1,time_degree+2);
+        }
+
+        // face - cell
+        for(size_t l2 = 0; l2 <= time_degree; l2++)
+        {
+            // previous time interface
+            lhs.block(ah.cols()*(time_degree+1), l2*cbs, cbs, cbs) += mass * time_stab(time_degree+1,l2);
+            // next time interface
+            lhs.block(ah.cols()*(time_degree+1) + cbs, l2*cbs, cbs, cbs) += mass * time_stab(time_degree+2,l2);
+        }
+
+        // face - face
+        // previous time interface
+        lhs.block(ah.cols()*(time_degree+1), ah.cols()*(time_degree+1), cbs, cbs)
+            += time_stab(time_degree+1,time_degree+1) * mass;
+        // next time interface
+        lhs.block(ah.cols()*(time_degree+1)+cbs, ah.cols()*(time_degree+1)+cbs, cbs, cbs)
+            += time_stab(time_degree+2,time_degree+2) * mass;
 
         /* Primal - Dual */
-        size_t dual_offset = (cbs + num_faces * fbs) * (time_degree+1);
+        size_t dual_offset = ah.cols()*(time_degree+1) + 2 * cbs;
 
-        // diffusion term (primal - dual)
+        /* space diffusion term (primal - dual) */
         // cell - cell
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
@@ -1718,14 +1719,35 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
         // the (dual - primal) component is obtained by symmetry (see further)
 
-        // derivative term
-        // (xi_T , d_t w_T)_{I_n x T}
+        /* time diffusion term (primal - dual) */
+        // cell - cell
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
-                lhs.block(l1*cbs, dual_offset + l2*cbs, cbs, cbs) += mass * time_deriv(l2,l1); // reversed l2 / l1 since the derivative is on the test function
+                lhs.block(l1*cbs, dual_offset + l2*cbs, cbs, cbs) -= at(l1, l2) * mass;
 
+        // cell - face
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+        {
+            lhs.block(l1*cbs, dual_offset + (time_degree+1)*ah.cols(), cbs, cbs)
+                -= at(l1, time_degree+1) * mass;
+            lhs.block(l1*cbs, dual_offset + (time_degree+1)*ah.cols()+cbs, cbs, cbs)
+                -= at(l1, time_degree+2) * mass;
+        }
 
-        /* the time coupling terms are taken into account later */
+        // face - cell
+        for(size_t l2 = 0; l2 <= time_degree; l2++)
+        {
+            lhs.block((time_degree+1)*ah.cols(), dual_offset + l2*cbs, cbs, cbs)
+                -= at(time_degree+1, l2) * mass;
+            lhs.block((time_degree+1)*ah.cols() + cbs, dual_offset + l2*cbs, cbs, cbs)
+                -= at(time_degree+2, l2) * mass;
+        }
+
+        // face - face
+        lhs.block( ah.cols()*(time_degree+1), dual_offset + ah.cols()*(time_degree+1), cbs, cbs)
+            -= at(time_degree+1, time_degree+1) * mass;
+        lhs.block( ah.cols()*(time_degree+1)+cbs, dual_offset + ah.cols()*(time_degree+1)+cbs, cbs, cbs)
+            -= at(time_degree+2, time_degree+2) * mass;
 
         /* Dual - Primal */
         // obtained by symmetry
@@ -1733,34 +1755,34 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             = lhs.block(0, dual_offset, dual_offset, dual_offset).transpose();
 
         /* Dual - Dual */
-        Matrix<T, Dynamic, Dynamic> sigma = stab;
-        sigma.block(0,0,cbs,cbs) += mass;
+        // space contributions
+        Matrix<T, Dynamic, Dynamic> space_sigma = stab;
 
         auto qps = integrate( msh, cl, 2*hdi.cell_degree() );
         for (auto& qp : qps)
         {
             // auto phi   = cb.eval_functions( qp.point() );
             auto g_phi = cb.eval_gradients( qp.point() );
-            sigma.block(0,0,cbs,cbs) += qp.weight() * g_phi * g_phi.transpose();
+            space_sigma.block(0,0,cbs,cbs) += qp.weight() * g_phi * g_phi.transpose();
         }
 
         // cell-cell
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 lhs.block(dual_offset + l1*cbs, dual_offset + l2*cbs, cbs, cbs)
-                    -= sigma.block(0, 0, cbs, cbs) * time_mass(l1,l2);
+                    -= space_sigma.block(0, 0, cbs, cbs) * time_mass(l1,l2);
 
         // cell - face
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 for(size_t face_j = 0; face_j < num_faces; face_j++)
-                    lhs.block(dual_offset + l1*cbs, dual_offset + cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs, cbs, fbs) -= sigma.block(0, cbs+face_j*fbs, cbs, fbs) * time_mass(l1,l2);
+                    lhs.block(dual_offset + l1*cbs, dual_offset + cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs, cbs, fbs) -= space_sigma.block(0, cbs+face_j*fbs, cbs, fbs) * time_mass(l1,l2);
 
         // face - cell
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             for(size_t l2 = 0; l2 <= time_degree; l2++)
                 for(size_t face_i = 0; face_i < num_faces; face_i++)
-                    lhs.block(dual_offset + cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs, dual_offset + l2*cbs, fbs, cbs) -= sigma.block(cbs + face_i * fbs, 0, fbs, cbs) * time_mass(l1,l2);
+                    lhs.block(dual_offset + cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs, dual_offset + l2*cbs, fbs, cbs) -= space_sigma.block(cbs + face_i * fbs, 0, fbs, cbs) * time_mass(l1,l2);
 
         // face - face
         for(size_t l1 = 0; l1 <= time_degree; l1++)
@@ -1768,87 +1790,34 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 for(size_t face_i = 0; face_i < num_faces; face_i++)
 		    for(size_t face_j = 0; face_j < num_faces; face_j++)
                         lhs.block(dual_offset + cbs*(time_degree+1) + face_i*(time_degree+1)*fbs + l1*fbs, dual_offset + cbs*(time_degree+1) + face_j*(time_degree+1)*fbs + l2*fbs, fbs, fbs)
-                            -= sigma.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
+                            -= space_sigma.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
+        // time contributions
+        // cell-cell
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                lhs.block(dual_offset + l1*cbs, dual_offset + l2*cbs, cbs, cbs)
+                    -= time_sigma(l1,l2) * mass;
+
+        // face - cell
+        for(size_t l2 = 0; l2 <= time_degree; l2++)
+        {
+            lhs.block(dual_offset + ah.cols()*(time_degree+1), dual_offset + l2*cbs, cbs, cbs) -= time_sigma(time_degree+1,l2) * mass;
+            lhs.block(dual_offset + ah.cols()*(time_degree+1) + cbs, dual_offset + l2*cbs, cbs, cbs) -= time_sigma(time_degree+2,l2) * mass;
+        }
+
+        // cell - face
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+        {
+            lhs.block(dual_offset + l1*cbs, dual_offset + ah.cols()*(time_degree+1), cbs, cbs) -= time_sigma(l1,time_degree+1) * mass;
+            lhs.block(dual_offset + l1*cbs, dual_offset + ah.cols()*(time_degree+1) + cbs, cbs, cbs) -= time_sigma(l1,time_degree+2) * mass;
+        }
+
+        // face - face
+        lhs.block(dual_offset + ah.cols()*(time_degree+1), dual_offset + ah.cols()*(time_degree+1), cbs, cbs) -= time_sigma(time_degree+1,time_degree+1) * mass;
+        lhs.block(dual_offset + ah.cols()*(time_degree+1)+cbs, dual_offset + ah.cols()*(time_degree+1)+cbs, cbs, cbs) -= time_sigma(time_degree+2,time_degree+2) * mass;
 
         // at this point all the lhs terms have been implemented
-
-        /*** Matrix coupling for the terms coupling two time steps ***/
-        size_t coupling_size = 4 * cbs * (time_degree+1); // we consider the cell dof on two time steps
-        Matrix<scalar_type, Dynamic, Dynamic> coupling = Matrix<scalar_type, Dynamic, Dynamic>::Zero(coupling_size, coupling_size);
-
-
-        /* coupling coming from the time derivative */
-        size_t ts_c = coupling_size/2; // time step coupling
-        size_t ts_dual = coupling_size/4;
-        // (w_T(t_{n-1}^+) , xi_T(t_{n-1}^+) )_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(ts_c + l1*cbs, ts_c + ts_dual + l2*cbs, cbs, cbs) += mass * time_loc(l1,l2);
-
-        // - (w_T(t_{n-1}^-) , xi_T(t_{n-1}^+))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(l1*cbs, ts_c + ts_dual + l2*cbs, cbs, cbs) -= mass * time_loc_cross(l1,l2);
-
-        // symmetric terms
-        coupling.block(ts_c + ts_dual, ts_c, ts_dual, ts_dual)
-            = coupling.block(ts_c, ts_c + ts_dual, ts_dual, ts_dual).transpose();
-        coupling.block(ts_c + ts_dual, 0, ts_dual, ts_dual)
-            = coupling.block(0, ts_c + ts_dual, ts_dual, ts_dual).transpose();
-
-        /* coupling coming from the time jump penalization */
-        T jump_coeff = 1.; // 1./dt;
-        // (v_T(t_{n-1}^+) , w_T(t_{n-1}^+))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(ts_c + l1*cbs, ts_c + l2*cbs, cbs, cbs)
-                    += jump_coeff * mass * time_loc(l1,l2);
-
-        // (v_T(t_{n-1}^-) , w_T(t_{n-1}^-))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(l1*cbs, l2*cbs, cbs, cbs)
-                    += jump_coeff * mass * time_loc_bis(l1,l2);
-
-        // - (v_T(t_{n-1}^-) , w_T(t_{n-1}^+))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(ts_c + l1*cbs, l2*cbs, cbs, cbs)
-                    -= jump_coeff * mass * time_loc_cross(l2,l1);
-
-        // - (v_T(t_{n-1}^+) , w_T(t_{n-1}^-))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
-                    -= jump_coeff * mass * time_loc_cross(l1,l2);
-
-        /* coupling coming from the gradient time jump penalization */
-        // (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^+))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(ts_c + l1*cbs, ts_c + l2*cbs, cbs, cbs)
-                    += jump_coeff * stiff * time_loc(l1,l2);
-
-        // (\GRAD v_T(t_{n-1}^-) , \GRAD w_T(t_{n-1}^-))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(l1*cbs, l2*cbs, cbs, cbs)
-                    += jump_coeff * stiff * time_loc_bis(l1,l2);
-
-        // - (\GRAD v_T(t_{n-1}^-) , \GRAD w_T(t_{n-1}^+))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(ts_c + l1*cbs, l2*cbs, cbs, cbs)
-                    -= jump_coeff * stiff * time_loc_cross(l2,l1);
-
-        // - (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^-))_{Omega}
-        for(size_t l1 = 0; l1 <= time_degree; l1++)
-            for(size_t l2 = 0; l2 <= time_degree; l2++)
-                coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
-                    -= jump_coeff * stiff * time_loc_cross(l1,l2);
-
-        // at this point all the coupling terms have been implemented
 
         /*** loop on the time steps ***/
         for(int step_i = 0; step_i < time_steps; step_i++) {
@@ -1863,7 +1832,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             // T noise_size = 0.001;
             T noise_size = 1.e-5;
 
-            // heat equation RHS
+            // wave equation RHS
             for(auto& qpt : qpst) // time integration
             {
                 auto t_phi   = t_cb.eval_functions( qpt.point() );
@@ -1922,14 +1891,9 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 rhs.block(0, 0, cbs*(time_degree+1), 1) = data_rhs;
             }
 
+            // send it to the assembler
             assembler.assemble(msh, cl, step_i, lhs, rhs);
         }
-
-        /*** add the time coupling terms triplets ***/
-        for(int step_i = 1; step_i < time_steps; step_i++) {
-            assembler.add_time_coupling(msh, cl, step_i, coupling);
-        }
-
     }
     cout << "end assembly loop" << endl;
 
@@ -1939,8 +1903,9 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     cout << "LHS.rows() = " << assembler.LHS.rows() << "  "
          << "LHS.cols() = " << assembler.LHS.cols() << endl;
-    cout << "2xcbsx(l+1)xNcxNt + (Nf+Nfi)xfbsx(l+1)xNt = "
-         << 2*cbs*(time_degree+1)*num_cells*time_steps + (assembler.num_assembled_faces() + nb_tot_faces) * fbs * (time_degree+1) * time_steps << endl;
+    cout << "2xcbsx(l+1)xNcxNt + (Nf+Nfi)xfbsx(l+1)xNt + 2xcbsxNcxNt= "
+         << 2*cbs*(time_degree+1)*num_cells*time_steps + (assembler.num_assembled_faces() + nb_tot_faces) * fbs * (time_degree+1) * time_steps
+         + 2*cbs*num_cells*time_steps << endl;
 
     assembler.finalize();
 
@@ -2127,7 +2092,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             // coordinates of the dual sol (cell components)
             Matrix<scalar_type, Dynamic, 1> dual_sol
-                = loc_sol.block((cbs+num_faces*fbs)*(time_degree+1), 0, cbs*(time_degree+1), 1);
+                = loc_sol.block((cbs+num_faces*fbs)*(time_degree+1)+2*cbs, 0, cbs*(time_degree+1), 1);
 
             for(size_t l1 = 0; l1 <= time_degree; l1++)
                 for(size_t l2 = 0; l2 <= time_degree; l2++)
@@ -2227,7 +2192,7 @@ tests_auto_1d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 auto diam = average_diameter(msh);
 
@@ -2283,7 +2248,7 @@ tests_auto_1d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -2373,7 +2338,7 @@ tests_auto_2d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 auto diam = average_diameter(msh);
 
@@ -2433,7 +2398,7 @@ tests_auto_2d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -2519,14 +2484,14 @@ int main(int argc, char **argv)
         loader.populate_mesh(msh);
         std::cout << "1D Mesh loaded ..." << std::endl;
 
-        UC_heat_solver(msh, degree, N, time_degree);
+        UC_wave_solver(msh, degree, N, time_degree);
 
         return 0;
     }
 
     auto msh = disk::load_fvca5_2d_mesh<T>(mesh_filename);
     std::cout << "2D Mesh loaded ..." << std::endl;
-    UC_heat_solver(msh, degree, N, time_degree);
+    UC_wave_solver(msh, degree, N, time_degree);
     return 0;
 }
 #endif
