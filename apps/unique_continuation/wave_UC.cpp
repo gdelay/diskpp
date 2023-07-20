@@ -41,7 +41,7 @@
 
 #include <Eigen/IterativeLinearSolvers>
 #include <unsupported/Eigen/IterativeSolvers>
-#include "solvers/mumps.hpp"
+// #include "solvers/mumps.hpp"
 
 
 
@@ -1968,17 +1968,17 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         tc.toc();
         std::cout << " GMRES Solving time: " << tc << std::endl;
     }
-    if(false)
-    {
-        tc.tic();
-        std::cout << "running MUMPS" << std::endl;
+    // if(false)
+    // {
+    //     tc.tic();
+    //     std::cout << "running MUMPS" << std::endl;
 
-        mumps_solver<scalar_type> mumps;
-        u = mumps.solve(LHS, RHS);
+    //     mumps_solver<scalar_type> mumps;
+    //     u = mumps.solve(LHS, RHS);
 
-        tc.toc();
-        std::cout << " MUMPS Solving time: " << tc << std::endl;
-    }
+    //     tc.toc();
+    //     std::cout << " MUMPS Solving time: " << tc << std::endl;
+    // }
 
     // tc.toc();
     
