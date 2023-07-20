@@ -7,7 +7,7 @@
  *  /_\/_\/_\/_\   methods.
  *
  * This file is copyright of the following authors:
- * Guillaume Delay  (C) 2021-2023          guillaume.delay@sorbonne-universite.fr
+ * Guillaume Delay  (C)  2023          guillaume.delay@sorbonne-universite.fr
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -23,7 +23,7 @@
  * DOI: 10.1016/j.cam.2017.09.017
  */
 
-/* this file deals with the unique continuation problem subject to the heat equation */
+/* this file deals with the unique continuation problem subject to the wave equation */
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -429,412 +429,11 @@ bool time_B(T time) {
 ////////////////////////////////////////////////////////////////////////////
 
 template<typename Mesh>
-class heat_UC_assembler
-{
-    using T = typename Mesh::coordinate_type;
-
-    std::vector<size_t>     compress_table;
-    std::vector<size_t>     expand_table;
-    hho_degree_info         di;
-    size_t                  time_degree;
-    std::vector<Triplet<T>> triplets; //, triplets_MAT_RHS;
-    bool                    BC_known;
-
-    size_t num_all_faces, num_dirichlet_faces, num_other_faces, num_cells, system_size, time_steps;
-
-    class assembly_index
-    {
-        size_t idx;
-        bool   assem;
-
-      public:
-        assembly_index(size_t i, bool as) : idx(i), assem(as) {}
-
-        operator size_t() const
-        {
-            if (!assem)
-                throw std::logic_error("Invalid assembly_index");
-
-            return idx;
-        }
-
-        bool
-        assemble() const
-        {
-            return assem;
-        }
-
-        friend std::ostream&
-        operator<<(std::ostream& os, const assembly_index& as)
-        {
-            os << "(" << as.idx << "," << as.assem << ")";
-            return os;
-        }
-    };
-
-    // list of boundaries that are not actual boundaries (has to be updated according to the considred mesh)
-    const vector<int> not_bnd;
-
-  public:
-    typedef dynamic_matrix<T> matrix_type;
-    typedef dynamic_vector<T> vector_type;
-
-    SparseMatrix<T> LHS; //, MAT_RHS;
-    vector_type     RHS;
-
-    // BC_known : true if we know the Dirichlet values of the solution, false otherwise
-    heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
-	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(BC_known), not_bnd({6,7,8,9,10,11})
-    {
-        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
-                                    return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
-                                return true;
-                                    };
-
-        num_all_faces       = msh.faces_size();
-        num_dirichlet_faces = std::count_if(msh.faces_begin(), msh.faces_end(), is_dirichlet);
-        num_other_faces     = num_all_faces - num_dirichlet_faces;
-        num_cells = msh.cells_size();
-
-        compress_table.resize(num_all_faces);
-        expand_table.resize(num_other_faces);
-
-        size_t compressed_offset = 0;
-        for (size_t i = 0; i < num_all_faces; i++)
-        {
-            const auto fc = *std::next(msh.faces_begin(), i);
-            if (!is_dirichlet(fc))
-            {
-                compress_table.at(i)               = compressed_offset;
-                expand_table.at(compressed_offset) = i;
-                compressed_offset++;
-            }
-        }
-
-        const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
-        const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
-        size_t sol_faces = num_all_faces;
-        if(BC_known) sol_faces = num_other_faces;
-
-        size_t space_system_size = fbs * (num_other_faces + sol_faces) + 2 * cbs * msh.cells_size();
-        system_size = space_system_size * (time_degree + 1) * time_steps;
-
-        LHS = SparseMatrix<T>(system_size, system_size);
-        // MAT_RHS = SparseMatrix<T>(system_size, system_size);
-        RHS = vector_type::Zero(system_size);
-        // RHS_F = vector_type::Zero(system_size);
-    }
-
-    // here the Dirichlet data are not taken into account
-    // the rhs function is not time-dependent
-
-    void
-    assemble(const Mesh&                     msh,
-             const typename Mesh::cell_type& cl,
-             const size_t                    n_step,
-             const matrix_type&              lhs,
-             const vector_type&              rhs)
-    {
-        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
-                                    return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
-                                return true;
-                            };
-
-        const auto fbs    = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
-        const auto cbs    = scalar_basis_size(di.cell_degree(), Mesh::dimension);
-        const auto fcs    = faces(msh, cl);
-        const auto fcs_id = faces_id(msh, cl);
-        // const auto num_faces = fcs.size();
-
-        std::vector<assembly_index> asm_map;
-        size_t loc_size = 2 * ( fcs.size() * fbs + cbs ) * (time_degree + 1);
-        asm_map.reserve(loc_size);
-
-        auto cell_offset = offset(msh, cl);
-        // first degrees of freedom are the cell components of the primal variable
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-        // then face components of the primal variable
-        for (size_t face_i = 0; face_i < fcs.size(); face_i++)
-        {
-            const auto face_offset     = fcs_id[face_i]; // offset(msh, fc);
-            auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps;
-            if(BC_known)
-                face_LHS_offset += compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // compress table
-            else
-                face_LHS_offset += face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
-
-            if(BC_known)
-            {
-                const auto fc = fcs[face_i];
-                const bool dirichlet = is_dirichlet(fc);
-
-                for (size_t i = 0; i < fbs*(time_degree+1); i++)
-                    asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
-            }
-            else
-            {
-                for (size_t i = 0; i < fbs*(time_degree+1); i++)
-                    asm_map.push_back(assembly_index(face_LHS_offset + i, true)); // no test on Dirichlet (no BC)
-            }
-        }
-
-        // then cell components of the dual variable
-        size_t num_sol_faces = num_all_faces;
-        if( BC_known ) num_sol_faces = num_other_faces;
-
-        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-        // then face components of the dual variable (with Dirichlet BC)
-        for (size_t face_i = 0; face_i < fcs.size(); face_i++)
-        {
-            const auto fc              = fcs[face_i];
-            const auto face_offset     = fcs_id[face_i]; // offset(msh, fc);
-            const auto face_LHS_offset = dual_offset + num_cells * cbs * (time_degree+1) * time_steps
-                + compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step;
-
-            const bool dirichlet = is_dirichlet(fc);
-
-            for (size_t i = 0; i < fbs*(time_degree+1); i++)
-                asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
-        }
-
-        // no initial data for the moment !!
-	// compute initial datum contribution to RHS
-        // vector_type u0 = vector_type::Zero(loc_size);
-        // u0.block(0,0,cbs,1) = project_function(msh, cl, di.cell_degree(), init_fun, di.cell_degree());
-        // auto rhs_modif = mat_rhs * u0 + rhs;
-
-        for (size_t i = 0; i < lhs.rows(); i++)
-        {
-            if (!asm_map[i].assemble())
-                continue;
-
-            for (size_t j = 0; j < lhs.cols(); j++)
-            {
-                if (asm_map[j].assemble())
-                {
-                    triplets.push_back(Triplet<T>(asm_map[i], asm_map[j], lhs(i, j)));
-                    // triplets_MAT_RHS.push_back(Triplet<T>(asm_map[i], asm_map[j], mat_rhs(i, j)));
-                    // do we need this ??
-		}
-                // Dirichlet not taken into account
-                // else
-                //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
-            }
-
-            RHS(asm_map[i]) += rhs(i);
-            // RHS_F(asm_map[i]) += rhs(i);
-            // do we need this ??
-        }
-    } // assemble()
-
-    /*
-     * lhs must have the size of two time cells
-     * n_step is between 1 and time_steps-1 (both included)
-     * the faces are not taken into account (the time coupling occurs through space cells only)
-     */
-    void
-    add_time_coupling(const Mesh&                     msh,
-                      const typename Mesh::cell_type& cl,
-                      const size_t                    n_step,
-                      const matrix_type&              lhs)
-    {
-        const auto cbs    = scalar_basis_size(di.cell_degree(), Mesh::dimension);
-        const auto fbs    = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
-
-        std::vector<assembly_index> asm_map;
-        size_t loc_size = 4 * cbs * (time_degree + 1);
-        /*
-         * degrees of freedom (cell variables) :
-         * - primal variable (previous time step)
-         * - dual variable (previous time step)
-         * - primal variable (next time step)
-         * - dual variable (next time step)
-         */
-        asm_map.reserve(loc_size);
-
-        /* previous time step */
-        auto cell_offset = offset(msh, cl);
-        size_t num_sol_faces = num_all_faces;
-        if( BC_known ) num_sol_faces = num_other_faces;
-        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
-
-        // cell components of the primal variable (previous time step)
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * (n_step-1) + i, true));
-
-        // cell components of the dual variable (previous time step)
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * (n_step-1) + i, true));
-
-        /* next time step */
-        // cell components of the primal variable (next time step)
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-        // cell components of the dual variable (next time step)
-        for(size_t i = 0; i < cbs*(time_degree+1); i++)
-            asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-        /* add the triplets */
-        for (size_t i = 0; i < lhs.rows(); i++)
-        {
-            if (!asm_map[i].assemble())
-                continue;
-
-            for (size_t j = 0; j < lhs.cols(); j++)
-            {
-                if (asm_map[j].assemble())
-                {
-                    triplets.push_back(Triplet<T>(asm_map[i], asm_map[j], lhs(i, j)));
-		}
-            }
-        }
-    }
-
-    template<typename Function>
-    vector_type
-    take_local_solution(const Mesh&                     msh,
-                        const typename Mesh::cell_type& cl,
-                        const size_t                    n_step,
-                        const vector_type&              solution,
-                        const Function&                 dirichlet_bf)
-    {
-        const auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
-        const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
-        const auto fcs = faces(msh, cl);
-        const auto num_faces = fcs.size();
-
-        vector_type ret = vector_type::Zero( 2*(num_faces * fbs + cbs) * (time_degree + 1) );
-
-        auto cell_offset = offset(msh, cl);
-
-        // primal variable : cell components
-        ret.block(0, 0, (time_degree+1)*cbs, 1)
-            = solution.block(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
-
-        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
-                                    return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
-                                return true;
-                            };
-
-        // primal variable : face components
-        for (size_t face_i = 0; face_i < num_faces; face_i++)
-        {
-            const auto fc = fcs[face_i];
-
-
-            // Dirichlet data not taken into account
-            // if (dirichlet)
-            // {
-            // 	for(int l=0; l <= time_degree; l++)
-            // 	    ret.block(cbs * (time_degree+1) + (face_i * time_degree + l) * fbs, 0, fbs, 1) =
-            // 		project_function(msh, fc, di.face_degree(), dirichlet_bf, di.face_degree());
-            // }
-
-            const auto face_offset     = offset(msh, fc);
-            auto face_LHS_offset = num_cells * cbs * (time_degree+1) * time_steps;
-            if(BC_known) face_LHS_offset += compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // compress table
-            else face_LHS_offset += face_offset * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step; // no Dirichlet BC so no compress table
-
-
-            const bool dirichlet = is_dirichlet(fc);
-
-            if(BC_known && dirichlet)
-                ret.block(cbs * (time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
-                    = vector_type::Zero((time_degree+1) * fbs);
-            else
-                ret.block(cbs * (time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
-                    = solution.block(face_LHS_offset, 0, fbs * (time_degree+1), 1);
-        }
-
-        // dual variable : cell components
-        size_t num_sol_faces = num_all_faces;
-        if(BC_known) num_sol_faces = num_other_faces;
-        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
-        ret.block((cbs + num_faces*fbs)*(time_degree+1), 0, (time_degree+1)*cbs, 1)
-            = solution.block(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
-
-
-        // dual variable : face components (BC)
-        for (size_t face_i = 0; face_i < num_faces; face_i++)
-        {
-            const auto fc = fcs[face_i];
-
-            const bool dirichlet = is_dirichlet(fc);
-
-            // Dirichlet data not taken into account
-            // if (dirichlet)
-            // {
-            // 	for(int l=0; l <= time_degree; l++)
-            // 	    ret.block(cbs * (time_degree+1) + (face_i * time_degree + l) * fbs, 0, fbs, 1) =
-            // 		project_function(msh, fc, di.face_degree(), dirichlet_bf, di.face_degree());
-            // }
-
-            if(!dirichlet)
-            {
-                const auto face_offset     = offset(msh, fc);
-                const auto face_SOL_offset = dual_offset + num_cells * cbs * (time_degree+1) * time_steps
-                + compress_table.at(face_offset) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step;
-		
-                ret.block((2*cbs + num_faces*fbs)*(time_degree+1) + face_i * (time_degree+1) * fbs, 0, (time_degree+1) * fbs, 1)
-                    = solution.block(face_SOL_offset, 0, fbs * (time_degree+1), 1);
-            }
-        }
-
-        return ret;
-    }
-
-    void
-    finalize(void)
-    {
-        LHS.setFromTriplets(triplets.begin(), triplets.end());
-        // MAT_RHS.setFromTriplets(triplets_MAT_RHS.begin(), triplets_MAT_RHS.end());
-        triplets.clear();
-        // triplets_MAT_RHS.clear();
-    }
-
-    size_t
-    num_assembled_faces() const
-    {
-        return num_other_faces;
-    }
-
-};
-
-
-template<typename Mesh>
-auto
-make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps, bool BC_known = false)
-{
-    return heat_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps, BC_known);
-}
-
-///////////////////////////////////////////////  WAVE
-
-template<typename Mesh>
 class wave_UC_assembler
 {
     using T = typename Mesh::coordinate_type;
+
+protected:
 
     std::vector<size_t>     compress_table;
     std::vector<size_t>     expand_table;
@@ -932,9 +531,7 @@ class wave_UC_assembler
         system_size = space_system_size * (time_degree + 1) * time_steps + 2 * time_steps * cbs * num_cells;
 
         LHS = SparseMatrix<T>(system_size, system_size);
-        // MAT_RHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
-        // RHS_F = vector_type::Zero(system_size);
     }
 
     // here the Dirichlet data are not taken into account
@@ -1064,70 +661,6 @@ class wave_UC_assembler
         }
     } // assemble()
 
-    /*
-     * lhs must have the size of two time cells
-     * n_step is between 1 and time_steps-1 (both included)
-     * the faces are not taken into account (the time coupling occurs through space cells only)
-     */
-    // void
-    // add_time_coupling(const Mesh&                     msh,
-    //                   const typename Mesh::cell_type& cl,
-    //                   const size_t                    n_step,
-    //                   const matrix_type&              lhs)
-    // {
-    //     const auto cbs    = scalar_basis_size(di.cell_degree(), Mesh::dimension);
-    //     const auto fbs    = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
-
-    //     std::vector<assembly_index> asm_map;
-    //     size_t loc_size = 4 * cbs * (time_degree + 1);
-    //     /*
-    //      * degrees of freedom (cell variables) :
-    //      * - primal variable (previous time step)
-    //      * - dual variable (previous time step)
-    //      * - primal variable (next time step)
-    //      * - dual variable (next time step)
-    //      */
-    //     asm_map.reserve(loc_size);
-
-    //     /* previous time step */
-    //     auto cell_offset = offset(msh, cl);
-    //     size_t num_sol_faces = num_all_faces;
-    //     if( BC_known ) num_sol_faces = num_other_faces;
-    //     size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
-
-    //     // cell components of the primal variable (previous time step)
-    //     for(size_t i = 0; i < cbs*(time_degree+1); i++)
-    //         asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * (n_step-1) + i, true));
-
-    //     // cell components of the dual variable (previous time step)
-    //     for(size_t i = 0; i < cbs*(time_degree+1); i++)
-    //         asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * (n_step-1) + i, true));
-
-    //     /* next time step */
-    //     // cell components of the primal variable (next time step)
-    //     for(size_t i = 0; i < cbs*(time_degree+1); i++)
-    //         asm_map.push_back(assembly_index(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-    //     // cell components of the dual variable (next time step)
-    //     for(size_t i = 0; i < cbs*(time_degree+1); i++)
-    //         asm_map.push_back(assembly_index(dual_offset + cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step + i, true));
-
-    //     /* add the triplets */
-    //     for (size_t i = 0; i < lhs.rows(); i++)
-    //     {
-    //         if (!asm_map[i].assemble())
-    //             continue;
-
-    //         for (size_t j = 0; j < lhs.cols(); j++)
-    //         {
-    //             if (asm_map[j].assemble())
-    //             {
-    //                 triplets.push_back(Triplet<T>(asm_map[i], asm_map[j], lhs(i, j)));
-    //     	}
-    //         }
-    //     }
-    // }
-
     // Dirichlet data are not taken into account
     template<typename Function>
     vector_type
@@ -1249,9 +782,7 @@ class wave_UC_assembler
     finalize(void)
     {
         LHS.setFromTriplets(triplets.begin(), triplets.end());
-        // MAT_RHS.setFromTriplets(triplets_MAT_RHS.begin(), triplets_MAT_RHS.end());
         triplets.clear();
-        // triplets_MAT_RHS.clear();
     }
 
     size_t
@@ -1268,6 +799,473 @@ auto
 make_wave_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps, bool BC_known = false)
 {
     return wave_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps, BC_known);
+}
+
+//////////////////////////////////////////////////////
+// static condensation
+template<typename Mesh, typename T>
+auto
+make_wave_UC_static_condensation(const Mesh& msh, const typename Mesh::cell_type& cl,
+                                 const hho_degree_info& hdi, size_t time_degree,
+                                 const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& lhs,
+                                 const typename Eigen::Matrix<T, Eigen::Dynamic, 1>& rhs)
+{
+    using matrix_type = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+    using vector_type = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+
+    const auto cbs       = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
+    const auto fbs       = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
+
+    const auto fcs            = faces(msh, cl);
+    const auto num_faces      = fcs.size();
+
+    const auto cell_dofs = cbs * (time_degree+1);
+    const auto f_dofs_u = num_faces * fbs * (time_degree+1) + 2 * cbs;
+    const auto dofs_u = f_dofs_u + cell_dofs;
+
+    assert(lhs.rows() == lhs.cols());
+    assert(lhs.cols() == 2*dofs_u);
+
+    // lhs matrix under the form ( S  A )
+    //                           ( B  C )
+    // withdraw matrices
+    const matrix_type S_TT = lhs.block(0, 0, cell_dofs, cell_dofs);
+    const matrix_type S_TF = lhs.block(0, cell_dofs, cell_dofs, f_dofs_u);
+    const matrix_type S_FT = lhs.block(cell_dofs, 0, f_dofs_u, cell_dofs);
+    const matrix_type S_FF = lhs.block(cell_dofs, cell_dofs, f_dofs_u, f_dofs_u);
+
+    const matrix_type A_TT = lhs.block(0, dofs_u, cell_dofs, cell_dofs);
+    const matrix_type A_TF = lhs.block(0, dofs_u+cell_dofs, cell_dofs, f_dofs_u);
+    const matrix_type A_FT = lhs.block(cell_dofs, dofs_u, f_dofs_u, cell_dofs);
+    const matrix_type A_FF = lhs.block(cell_dofs, dofs_u+cell_dofs, f_dofs_u, f_dofs_u);
+
+    const matrix_type B_TT = lhs.block(dofs_u, 0, cell_dofs, cell_dofs);
+    const matrix_type B_TF = lhs.block(dofs_u, cell_dofs, cell_dofs, f_dofs_u);
+    const matrix_type B_FT = lhs.block(dofs_u+cell_dofs, 0, f_dofs_u, cell_dofs);
+    const matrix_type B_FF = lhs.block(dofs_u+cell_dofs, cell_dofs, f_dofs_u, f_dofs_u);
+
+    const matrix_type C_TT = lhs.block(dofs_u, dofs_u, cell_dofs, cell_dofs);
+    const matrix_type C_TF = lhs.block(dofs_u, dofs_u+cell_dofs, cell_dofs, f_dofs_u);
+    const matrix_type C_FT = lhs.block(dofs_u+cell_dofs, dofs_u, f_dofs_u, cell_dofs);
+    const matrix_type C_FF = lhs.block(dofs_u+cell_dofs, dofs_u+cell_dofs, f_dofs_u, f_dofs_u);
+
+    // withdraw rhs
+    const vector_type Fu_T = rhs.block(0, 0, cell_dofs, 1);
+    const vector_type Fu_F = rhs.block(cell_dofs, 0, f_dofs_u, 1);
+    const vector_type Fz_T = rhs.block(dofs_u, 0, cell_dofs, 1);
+    const vector_type Fz_F = rhs.block(dofs_u+cell_dofs, 0, f_dofs_u, 1);
+
+
+    // The problem is ( D_TT D_TF ) (X_T) = (G_T)
+    //                ( D_FT D_FF ) (X_F) = (G_F)
+
+    // compute intermediate matrices and rhs
+    matrix_type D_TT = matrix_type::Zero(2*cell_dofs,2*cell_dofs);
+    D_TT.block(0,0,cell_dofs,cell_dofs) = S_TT;
+    D_TT.block(0,cell_dofs,cell_dofs,cell_dofs) = A_TT;
+    D_TT.block(cell_dofs,0,cell_dofs,cell_dofs) = B_TT;
+    D_TT.block(cell_dofs,cell_dofs,cell_dofs,cell_dofs) = C_TT;
+
+    matrix_type D_TF = matrix_type::Zero(2*cell_dofs,2*f_dofs_u);
+    D_TF.block(0,0,cell_dofs,f_dofs_u) = S_TF;
+    D_TF.block(0,f_dofs_u,cell_dofs,f_dofs_u) = A_TF;
+    D_TF.block(cell_dofs,0,cell_dofs,f_dofs_u) = B_TF;
+    D_TF.block(cell_dofs,f_dofs_u,cell_dofs,f_dofs_u) = C_TF;
+
+    matrix_type D_FT = matrix_type::Zero(2*f_dofs_u,2*cell_dofs);
+    D_FT.block(0,0,f_dofs_u,cell_dofs) = S_FT;
+    D_FT.block(0,cell_dofs,f_dofs_u,cell_dofs) = A_FT;
+    D_FT.block(f_dofs_u,0,f_dofs_u,cell_dofs) = B_FT;
+    D_FT.block(f_dofs_u,cell_dofs,f_dofs_u,cell_dofs) = C_FT;
+
+    matrix_type D_FF = matrix_type::Zero(2*f_dofs_u,2*f_dofs_u);
+    D_FF.block(0,0,f_dofs_u,f_dofs_u) = S_FF;
+    D_FF.block(0,f_dofs_u,f_dofs_u,f_dofs_u) = A_FF;
+    D_FF.block(f_dofs_u,0,f_dofs_u,f_dofs_u) = B_FF;
+    D_FF.block(f_dofs_u,f_dofs_u,f_dofs_u,f_dofs_u) = C_FF;
+
+    vector_type G_T = vector_type::Zero(2*cell_dofs);
+    G_T.block(0,0,cell_dofs,1) = Fu_T;
+    G_T.block(cell_dofs,0,cell_dofs,1) = Fz_T;
+
+    vector_type G_F = vector_type::Zero(2*f_dofs_u);
+    G_F.block(0,0,f_dofs_u,1) = Fu_F;
+    G_F.block(f_dofs_u,0,f_dofs_u,1) = Fz_F;
+
+    // compute the condensed matrices
+    auto D_cph_QR = D_TT.colPivHouseholderQr();
+
+    matrix_type tD = matrix_type::Zero(2*f_dofs_u,2*f_dofs_u);
+    tD = D_FF - D_FT * D_cph_QR.solve(D_TF);
+
+    vector_type tG = vector_type::Zero(2*f_dofs_u);
+    tG = G_F - D_FT * D_cph_QR.solve(G_T);
+
+    return std::make_pair(tD,tG);
+}
+// static decondensation
+template<typename Mesh, typename T>
+auto
+make_wave_UC_static_decondensation(const Mesh& msh, const typename Mesh::cell_type& cl,
+                                   const hho_degree_info& hdi, size_t time_degree,
+                                   const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& lhs,
+                                   const typename Eigen::Matrix<T, Eigen::Dynamic, 1>& rhs,
+                                   const typename Eigen::Matrix<T, Eigen::Dynamic, 1>& solF)
+{
+    using matrix_type = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+    using vector_type = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+
+    const auto cbs       = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
+    const auto fbs       = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
+
+    const auto fcs            = faces(msh, cl);
+    const auto num_faces      = fcs.size();
+
+    const auto cell_dofs = cbs * (time_degree+1);
+    const auto f_dofs_u = num_faces * fbs * (time_degree+1) + 2 * cbs;
+    const auto dofs_u = f_dofs_u + cell_dofs;
+
+    assert(lhs.rows() == lhs.cols());
+    assert(lhs.cols() == 2*dofs_u);
+    assert(solF.rows() == 2*f_dofs_u);
+
+    // lhs matrix under the form ( S  A )
+    //                           ( B  C )
+    // withdraw matrices
+    const matrix_type S_TT = lhs.block(0, 0, cell_dofs, cell_dofs);
+    const matrix_type S_TF = lhs.block(0, cell_dofs, cell_dofs, f_dofs_u);
+
+    const matrix_type A_TT = lhs.block(0, dofs_u, cell_dofs, cell_dofs);
+    const matrix_type A_TF = lhs.block(0, dofs_u+cell_dofs, cell_dofs, f_dofs_u);
+
+    const matrix_type B_TT = lhs.block(dofs_u, 0, cell_dofs, cell_dofs);
+    const matrix_type B_TF = lhs.block(dofs_u, cell_dofs, cell_dofs, f_dofs_u);
+
+    const matrix_type C_TT = lhs.block(dofs_u, dofs_u, cell_dofs, cell_dofs);
+    const matrix_type C_TF = lhs.block(dofs_u, dofs_u+cell_dofs, cell_dofs, f_dofs_u);
+
+    // withdraw rhs
+    const vector_type Fu_T = rhs.block(0, 0, cell_dofs, 1);
+    const vector_type Fz_T = rhs.block(dofs_u, 0, cell_dofs, 1);
+
+    // The problem is ( D_TT D_TF ) (X_T) = (G_T)
+    //                ( D_FT D_FF ) (X_F) = (G_F)
+    // intermediate matrices and rhs
+    matrix_type D_TT = matrix_type::Zero(2*cell_dofs,2*cell_dofs);
+    D_TT.block(0,0,cell_dofs,cell_dofs) = S_TT;
+    D_TT.block(0,cell_dofs,cell_dofs,cell_dofs) = A_TT;
+    D_TT.block(cell_dofs,0,cell_dofs,cell_dofs) = B_TT;
+    D_TT.block(cell_dofs,cell_dofs,cell_dofs,cell_dofs) = C_TT;
+
+    matrix_type D_TF = matrix_type::Zero(2*cell_dofs,2*f_dofs_u);
+    D_TF.block(0,0,cell_dofs,f_dofs_u) = S_TF;
+    D_TF.block(0,f_dofs_u,cell_dofs,f_dofs_u) = A_TF;
+    D_TF.block(cell_dofs,0,cell_dofs,f_dofs_u) = B_TF;
+    D_TF.block(cell_dofs,f_dofs_u,cell_dofs,f_dofs_u) = C_TF;
+
+    vector_type G_T = vector_type::Zero(2*cell_dofs);
+    G_T.block(0,0,cell_dofs,1) = Fu_T;
+    G_T.block(cell_dofs,0,cell_dofs,1) = Fz_T;
+
+    // compute the cell solution
+    auto D_cph_QR = D_TT.colPivHouseholderQr();
+    vector_type X_T = D_cph_QR.solve( G_T - D_TF * solF );
+
+    // return the full solution
+    vector_type ret = vector_type::Zero(2*dofs_u);
+    ret.block(0,0,cell_dofs,1) = X_T.block(0,0,cell_dofs,1);
+    ret.block(cell_dofs,0,f_dofs_u,1) = solF.block(0,0,f_dofs_u,1);
+    ret.block(dofs_u,0,cell_dofs,1) = X_T.block(cell_dofs,0,cell_dofs,1);
+    ret.block(dofs_u+cell_dofs,0,f_dofs_u,1) = solF.block(f_dofs_u,0,f_dofs_u,1);
+
+    return ret;
+}
+
+// condensed assembler for wave_UC
+template<typename Mesh>
+class condensed_wave_UC_assembler : public wave_UC_assembler<Mesh>
+{
+    using T = typename Mesh::coordinate_type;
+
+  public:
+    typedef dynamic_matrix<T> matrix_type;
+    typedef dynamic_vector<T> vector_type;
+
+    std::vector< matrix_type > loc_LHS;
+    std::vector< vector_type > loc_RHS;
+
+    // BC_known : true if we know the Dirichlet values of the solution, false otherwise
+    // not_bnd : chosen for the .geo files in the current folder
+    condensed_wave_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
+	: wave_UC_assembler<Mesh>(msh, hdi, t_degree, t_steps, BC_known)
+    {
+        // allocate memory for local problems
+        loc_LHS.resize(this->num_cells * t_steps);
+        loc_RHS.resize(this->num_cells * t_steps);
+
+        const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
+        const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
+
+        // set system size
+        size_t sol_faces = this->num_all_faces;
+        if(BC_known) sol_faces = this->num_other_faces;
+        this->system_size = fbs * (this->num_other_faces + sol_faces) * (this->time_degree + 1) * t_steps + 2 * t_steps * cbs * this->num_cells;
+
+        // prepare global problem
+        this->LHS = SparseMatrix<T>(this->system_size, this->system_size);
+        this->RHS = vector_type::Zero(this->system_size);
+    }
+
+    // here the Dirichlet data are not taken into account
+    void
+    assemble(const Mesh&                     msh,
+             const typename Mesh::cell_type& cl,
+             const size_t                    n_step,
+             const matrix_type&              lhs,
+             const vector_type&              rhs)
+    {
+        // store local problems
+        auto cell_offset = offset(msh, cl);
+        loc_LHS.at( cell_offset * this->time_steps + n_step ) = lhs;
+        loc_RHS.at( cell_offset * this->time_steps + n_step ) = rhs;
+
+        // use static condensation
+        auto sc = make_wave_UC_static_condensation(msh, cl, this->di, this->time_degree, lhs, rhs);
+        auto lhs_sc = sc.first;
+        auto rhs_sc = sc.second;
+
+        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
+                                if( !msh.is_boundary(fc) )
+                                    return false;
+                                auto bnd_id = msh.boundary_id(fc);
+                                for (auto it = this->not_bnd.begin(); it != this->not_bnd.end(); it++)
+                                    if(bnd_id == *it)
+                                        return false;
+                                return true;
+                            };
+
+        const auto fbs    = scalar_basis_size(this->di.face_degree(), Mesh::dimension - 1);
+        const auto cbs    = scalar_basis_size(this->di.cell_degree(), Mesh::dimension);
+        const auto fcs    = faces(msh, cl);
+        const auto fcs_id = faces_id(msh, cl);
+
+        std::vector<assembly_index> asm_map;
+        // we consider (time-space) cell-face and face-cell
+        size_t loc_size = 2 * ( fcs.size() * fbs ) * (this->time_degree + 1) + 2 * 2 * cbs;
+        asm_map.reserve(loc_size);
+
+        // cell-cell components not considered (static condensation)
+
+        // cell-face components of the primal variable
+        for (size_t face_i = 0; face_i < fcs.size(); face_i++)
+        {
+            const auto face_offset     = fcs_id[face_i]; // offset(msh, fc);
+            size_t face_LHS_offset = 0;
+            if(this->BC_known)
+                face_LHS_offset = this->compress_table.at(face_offset) * fbs * (this->time_degree+1) * this->time_steps + fbs * (this->time_degree+1) * n_step; // compress table
+            else
+                face_LHS_offset = face_offset * fbs * (this->time_degree+1) * this->time_steps + fbs * (this->time_degree+1) * n_step; // no Dirichlet BC so no compress table
+
+            if(this->BC_known)
+            {
+                const auto fc = fcs[face_i];
+                const bool dirichlet = is_dirichlet(fc);
+
+                for (size_t i = 0; i < fbs*(this->time_degree+1); i++)
+                    asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
+            }
+            else
+            {
+                for (size_t i = 0; i < fbs*(this->time_degree+1); i++)
+                    asm_map.push_back(assembly_index(face_LHS_offset + i, true)); // no test on Dirichlet (no BC)
+            }
+        }
+
+        // then face-cell components of the primal variable
+        size_t sol_faces = this->num_all_faces;
+        if(this->BC_known) sol_faces = this->num_other_faces;
+        size_t face_cell_offset = sol_faces * fbs * (this->time_degree+1) * this->time_steps;
+        face_cell_offset += cell_offset * cbs * (this->time_steps+1) + cbs * n_step;
+        for(size_t i = 0; i < 2*cbs; i++)
+            asm_map.push_back(assembly_index(face_cell_offset + i, true));
+
+        // cell-cell components not considered (static condensation)
+
+        // then cell-face components of the dual variable (with Dirichlet BC)
+        size_t dual_offset = sol_faces * fbs * (this->time_degree+1) * this->time_steps + this->num_cells * cbs * (this->time_steps+1);
+        for (size_t face_i = 0; face_i < fcs.size(); face_i++)
+        {
+            const auto fc              = fcs[face_i];
+            const auto face_offset     = fcs_id[face_i]; // offset(msh, fc);
+            const auto face_LHS_offset = dual_offset + this->compress_table.at(face_offset) * fbs * (this->time_degree+1) * this->time_steps + fbs * (this->time_degree+1) * n_step;
+
+            const bool dirichlet = is_dirichlet(fc);
+
+            for (size_t i = 0; i < fbs*(this->time_degree+1); i++)
+                asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
+        }
+
+        // then face-cell components of the dual variable
+        size_t dual_face_cell_offset = dual_offset + this->num_other_faces * fbs * (this->time_degree+1) * this->time_steps;
+        dual_face_cell_offset += cell_offset * cbs * (this->time_steps-1) + cbs * (n_step-1);
+
+        // we do not assemble the first and last time interfaces for the dual variable
+        bool first_step = (n_step == 0);
+        bool last_step = (n_step == this->time_steps-1);
+        for(size_t i = 0; i < cbs; i++)
+            asm_map.push_back(assembly_index(dual_face_cell_offset + i, !first_step));
+        for(size_t i = 0; i < cbs; i++)
+            asm_map.push_back(assembly_index(dual_face_cell_offset + cbs + i, !last_step));
+
+        // no initial data for the moment !!
+	// compute initial datum contribution to RHS
+        // vector_type u0 = vector_type::Zero(loc_size);
+        // u0.block(0,0,cbs,1) = project_function(msh, cl, di.cell_degree(), init_fun, di.cell_degree());
+        // auto rhs_modif = mat_rhs * u0 + rhs;
+
+        for (size_t i = 0; i < lhs_sc.rows(); i++)
+        {
+            if (!asm_map[i].assemble())
+                continue;
+
+            for (size_t j = 0; j < lhs_sc.cols(); j++)
+            {
+                if (asm_map[j].assemble())
+                    this->triplets.push_back(Triplet<T>(asm_map[i], asm_map[j], lhs_sc(i, j)));
+                // Dirichlet not taken into account
+            }
+
+            this->RHS(asm_map[i]) += rhs_sc(i);
+        }
+    } // assemble()
+
+    // Dirichlet data are not taken into account
+    template<typename Function>
+    vector_type
+    take_local_solution(const Mesh&                     msh,
+                        const typename Mesh::cell_type& cl,
+                        const size_t                    n_step,
+                        const vector_type&              solution,
+                        const Function&                 dirichlet_bf)
+    {
+        const auto fbs = scalar_basis_size(this->di.face_degree(), Mesh::dimension - 1);
+        const auto cbs = scalar_basis_size(this->di.cell_degree(), Mesh::dimension);
+        const auto fcs = faces(msh, cl);
+        const auto num_faces = fcs.size();
+
+
+        /*******************  GET THE SOLUTION ON THE FACES  **********************/
+
+        vector_type solF = vector_type::Zero( 2*(num_faces * fbs) * (this->time_degree + 1) + 2 * 2 * cbs);
+
+        auto cell_offset = offset(msh, cl);
+
+        // cell-cell components not considered (static condensation)
+
+        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
+                                if( !msh.is_boundary(fc) )
+                                    return false;
+                                auto bnd_id = msh.boundary_id(fc);
+                                for (auto it = this->not_bnd.begin(); it != this->not_bnd.end(); it++)
+                                    if(bnd_id == *it)
+                                        return false;
+                                return true;
+                            };
+
+        // primal variable : cell-face components
+        for (size_t face_i = 0; face_i < num_faces; face_i++)
+        {
+            const auto fc = fcs[face_i];
+
+
+            // Dirichlet data not taken into account
+            // if (dirichlet)
+            // {
+            // 	for(int l=0; l <= time_degree; l++)
+            // 	    ret.block(cbs * (time_degree+1) + (face_i * time_degree + l) * fbs, 0, fbs, 1) =
+            // 		project_function(msh, fc, di.face_degree(), dirichlet_bf, di.face_degree());
+            // }
+
+            const auto face_offset     = offset(msh, fc);
+            size_t face_LHS_offset = 0;
+            if(this->BC_known) face_LHS_offset += this->compress_table.at(face_offset) * fbs * (this->time_degree+1) * this->time_steps + fbs * (this->time_degree+1) * n_step; // compress table
+            else face_LHS_offset += face_offset * fbs * (this->time_degree+1) * this->time_steps + fbs * (this->time_degree+1) * n_step; // no Dirichlet BC so no compress table
+
+
+            const bool dirichlet = is_dirichlet(fc);
+
+            if(this->BC_known && dirichlet)
+                solF.block(face_i * (this->time_degree+1) * fbs, 0, (this->time_degree+1) * fbs, 1)
+                    = vector_type::Zero((this->time_degree+1) * fbs);
+            else
+                solF.block(face_i * (this->time_degree+1) * fbs, 0, (this->time_degree+1) * fbs, 1)
+                    = solution.block(face_LHS_offset, 0, fbs * (this->time_degree+1), 1);
+        }
+
+        // primal variable : face-cell components
+        size_t sol_faces = this->num_all_faces;
+        if(this->BC_known) sol_faces = this->num_other_faces;
+        size_t face_cell_offset = sol_faces * fbs * (this->time_degree+1) * this->time_steps;
+        face_cell_offset += cell_offset * cbs * (this->time_steps+1) + cbs * n_step;
+        solF.block( (num_faces*fbs)*(this->time_degree+1), 0, 2*cbs, 1)
+            = solution.block(face_cell_offset, 0, 2*cbs, 1);
+
+        // cell-cell components not considered (static condensation)
+
+        // dual variable : cell-face components (Dirichlet BC)
+        size_t dual_offset = sol_faces * fbs * (this->time_degree+1) * this->time_steps
+            + this->num_cells * cbs * (this->time_steps+1);
+        for (size_t face_i = 0; face_i < num_faces; face_i++)
+        {
+            const auto fc = fcs[face_i];
+
+            const bool dirichlet = is_dirichlet(fc);
+
+            // Dirichlet data not taken into account
+            // if (dirichlet)
+            // {
+            // 	for(int l=0; l <= time_degree; l++)
+            // 	    ret.block(cbs * (time_degree+1) + (face_i * time_degree + l) * fbs, 0, fbs, 1) =
+            // 		project_function(msh, fc, di.face_degree(), dirichlet_bf, di.face_degree());
+            // }
+
+            if(!dirichlet)
+            {
+                const auto face_offset     = offset(msh, fc);
+                const auto face_SOL_offset = dual_offset
+                + this->compress_table.at(face_offset) * fbs * (this->time_degree+1) * this->time_steps + fbs * (this->time_degree+1) * n_step;
+
+                solF.block((num_faces*fbs)*(this->time_degree+1) + 2*cbs + face_i * (this->time_degree+1) * fbs, 0, (this->time_degree+1) * fbs, 1)
+                    = solution.block(face_SOL_offset, 0, fbs * (this->time_degree+1), 1);
+            }
+        }
+
+        // dual variable : face-cell components
+        size_t dual_face_cell_offset = dual_offset + this->num_other_faces * fbs * (this->time_degree+1) * this->time_steps;
+        dual_face_cell_offset += cell_offset * cbs * (this->time_steps-1) + cbs * (n_step-1);
+
+        // we do not assemble the first and last time interfaces for the dual variable
+        if( n_step > 0 )
+            solF.block( 2*(num_faces*fbs)*(this->time_degree+1) + 2*cbs, 0, cbs, 1 )
+                = solution.block(dual_face_cell_offset, 0, cbs, 1);
+        if( n_step < this->time_steps-1 )
+            solF.block( 2*(num_faces*fbs)*(this->time_degree+1) + 3*cbs, 0, cbs, 1 )
+                = solution.block(dual_face_cell_offset+cbs, 0, cbs, 1);
+
+        /*******************  COMPUTE THE SOLUTION ON THE CELLS  **********************/
+
+        return make_wave_UC_static_decondensation
+            (msh, cl, this->di, this->time_degree, loc_LHS[cell_offset*this->time_steps+n_step], loc_RHS[cell_offset*this->time_steps+n_step],solF);
+    }
+
+};
+
+
+template<typename Mesh>
+auto
+make_condensed_wave_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps, bool BC_known = false)
+{
+    return condensed_wave_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps, BC_known);
 }
 
 //////////////////////////////////////////////////////
@@ -1529,7 +1527,8 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto num_cells = msh.cells_size();
     auto nb_tot_faces = msh.faces_size();
 
-    auto assembler = make_wave_UC_assembler(msh, hdi, time_degree, time_steps, true);
+    // auto assembler = make_wave_UC_assembler(msh, hdi, time_degree, time_steps, true);
+    auto assembler = make_condensed_wave_UC_assembler(msh, hdi, time_degree, time_steps, true);
 
     const bool EXPORT_NOISE = false;
 
@@ -2075,10 +2074,17 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             /******** compute errors ********/
 
-            /* compute L2-H1-error of the current time step */
-            Matrix<scalar_type, Dynamic, 1> diff
-                = u.block(cell_i*cbs*(time_degree+1)*time_steps + cbs * (time_degree+1) * step_i, 0, cbs*(time_degree+1), 1) - proj;
+            auto loc_sol = assembler.take_local_solution(msh, cl, step_i, u, sol_fun);
 
+            // coordinates of the primal error (cell components)
+            Matrix<scalar_type, Dynamic, 1> diff
+                = loc_sol.block(0, 0, cbs*(time_degree+1), 1) - proj;
+
+            // coordinates of the dual sol (cell components)
+            Matrix<scalar_type, Dynamic, 1> dual_sol
+                = loc_sol.block((cbs+num_faces*fbs)*(time_degree+1)+2*cbs, 0, cbs*(time_degree+1), 1);
+
+            /* compute L2-H1-error of the current time step */
             Matrix<scalar_type, Dynamic, Dynamic> grad_matrix
                 = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs , cbs);
             for(auto& qp : qps)
@@ -2088,11 +2094,6 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             }
 
             const auto& bar = barycenter(msh,cl);
-            auto loc_sol = assembler.take_local_solution(msh, cl, step_i, u, sol_fun);
-
-            // coordinates of the dual sol (cell components)
-            Matrix<scalar_type, Dynamic, 1> dual_sol
-                = loc_sol.block((cbs+num_faces*fbs)*(time_degree+1)+2*cbs, 0, cbs*(time_degree+1), 1);
 
             for(size_t l1 = 0; l1 <= time_degree; l1++)
                 for(size_t l2 = 0; l2 <= time_degree; l2++)
@@ -2414,7 +2415,7 @@ tests_auto_2d()
 }
 
 /* run main with :
-   ./heat_UC
+   ./wave_UC
 */
 int main(int argc, char **argv)
 {
@@ -2425,8 +2426,8 @@ int main(int argc, char **argv)
 
 #if 0
 /* run main with :
-   ./heat_UC -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
-   ./heat_UC -M 8 -k 1 -N 8 -l 0
+   ./wave_UC -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
+   ./wave_UC -M 8 -k 1 -N 8 -l 0
 */
 
 int main(int argc, char **argv)
