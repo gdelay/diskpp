@@ -129,6 +129,45 @@ public:
     }
 };
 
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+class noise_representation< Mesh<T, 3, Storage> >
+{
+private:
+    typedef Mesh<T,3,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    size_t M;                     // number of domain sub-divisions along each dimension
+    std::vector<scalar_type> tab; // tabular for the noise level in each sub-division
+
+public:
+    noise_representation(size_t M, scalar_type noise_size) : M(M)
+    {
+        size_t M_tot = pow(M,4); // total number of sub-divisions
+        tab.reserve(M_tot);
+
+        // we need to compute the noise for each sub-division
+        for(int i=0; i<M_tot; i++)
+            tab.push_back( noise_size * ((std::rand() % 200)-100) * 0.01 );
+    }
+    scalar_type operator()(const scalar_type t, const point_type& pt) const
+    {
+        scalar_type x = pt.x(), y = pt.y(), z = pt.z();
+        assert(0 <= x && x <= 1);
+        assert(0 <= y && y <= 1);
+        assert(0 <= z && z <= 1);
+        assert(0 <= t && t <= 2);
+
+        size_t x_pos = x * M;
+        size_t y_pos = y * M;
+        size_t z_pos = z * M;
+        size_t t_pos = (t/2.) * M;
+        assert(x_pos < M && y_pos < M && z_pos < M && t_pos < M);
+
+        return tab[t_pos*M*M*M + x_pos*M*M + y_pos*M + z_pos];
+    }
+};
+
 template<typename Mesh>
 auto make_noise_representation(const Mesh& msh, size_t M, typename Mesh::coordinate_type noise_level)
 {
@@ -149,6 +188,12 @@ template<> // dim = 2
 string init_noise_file<2>()
 {
     return "#x\ty\tt\tnoise";
+}
+
+template<> // dim = 3
+string init_noise_file<3>()
+{
+    return "#x\ty\tz\tt\tnoise";
 }
 
 
@@ -182,6 +227,22 @@ public:
     {
         std::stringstream ss_noise;
         ss_noise << pt.x() << "\t" << pt.y() << "\t" << t << "\t" << noise;
+        return ss_noise.str();
+    }
+};
+
+// dim = 3
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+class line_noise_file< Mesh<T, 3, Storage> >
+{
+    typedef Mesh<T,3,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+public:
+    std::string operator() (scalar_type t, const point_type& pt, scalar_type noise)
+    {
+        std::stringstream ss_noise;
+        ss_noise << pt.x() << "\t" << pt.y() << "\t" << pt.z() << "\t" << t << "\t" << noise;
         return ss_noise.str();
     }
 };
@@ -228,6 +289,19 @@ struct rhs_functor< Mesh<T, 2, Storage> >
     }
 };
 
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct rhs_functor< Mesh<T, 3, Storage> >
+{
+    typedef Mesh<T,3,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    scalar_type operator()(const T t, const point_type& pt) const
+    {
+        return 2 * M_PI * M_PI * std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y()) * std::sin(M_PI*pt.z());
+    }
+};
+
 template<typename Mesh>
 auto make_rhs_function(const Mesh& msh)
 {
@@ -269,6 +343,22 @@ struct solution_functor< Mesh<T, 2, Storage> >
     scalar_type operator()(T t, const point_type& pt) const
     {
         return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+    }
+};
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct solution_functor< Mesh<T, 3, Storage> >
+{
+    typedef Mesh<T,3,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    solution_functor< Mesh<T, 3, Storage> >()
+        {}
+
+    scalar_type operator()(T t, const point_type& pt) const
+    {
+        return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y()) * std::sin(M_PI*pt.z());
     }
 };
 
@@ -328,6 +418,28 @@ struct varpi_functor< Mesh<T, 2, Storage> >
             ret = 0.0;
         else
             ret = 1.0;
+
+        return ret;
+    }
+};
+
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct varpi_functor< Mesh<T, 3, Storage> >
+{
+    typedef Mesh<T,3,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    scalar_type operator()(const point_type& pt) const
+    {
+        scalar_type ret;
+
+        bool Ndom1 = pt.x() < 0.5 && pt.y() < 0.5 && pt.z() < 0.5;
+        if( Ndom1 )
+            ret = 1.0;
+        else
+            ret = 0.0;
 
         return ret;
     }
@@ -395,6 +507,27 @@ struct B_functor< Mesh<T, 2, Storage> >
     }
 };
 
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct B_functor< Mesh<T, 3, Storage> >
+{
+    typedef Mesh<T,3,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+
+    scalar_type operator()(const point_type& pt) const
+    {
+        scalar_type ret;
+
+        bool Ndom4 = (pt.x() <= 0.875) && (pt.y() <= 0.875) && (pt.z() <= 0.875);
+        if( Ndom4 )
+            ret = 1.0;
+        else
+            ret = 0.0;
+
+        return ret;
+    }
+};
 
 template<typename Mesh>
 auto make_B_function(const Mesh& msh)
@@ -1381,6 +1514,35 @@ export_to_silo(const Mesh<T, 2, Storage>& msh,
     silo.close();
 }
 
+/////////////////////////
+// dim = 3 (same as for dim = 2)
+
+template<template<typename, size_t, typename> class Mesh,
+         typename T, typename Storage>
+void
+export_to_silo(const Mesh<T, 3, Storage>& msh,
+               const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
+               const Matrix<T, Dynamic, 1>& B, int cycle = -1)
+{
+    disk::silo_database silo;
+
+    if (cycle == -1)
+        silo.create("UC_wave.silo");
+    else
+    {
+        std::stringstream ss;
+        ss << "out_" << cycle << ".silo";
+        silo.create(ss.str());
+    }
+
+    silo.add_mesh(msh, "mesh");
+
+    silo.add_variable("mesh", "sol", data, disk::zonal_variable_t );
+    silo.add_variable("mesh", "varpi", varpi, disk::zonal_variable_t );
+    silo.add_variable("mesh", "B", B, disk::zonal_variable_t );
+    silo.close();
+}
+
 ///////////////////////////////////////
 
 /////////////////////////////////////////////////////////////////
@@ -2210,7 +2372,7 @@ tests_auto_1d()
 
     }
     /*********************  REFINEMENT IN TIME  **************************/
-    if(false)
+    if(true)
     {
         size_t nb_meshes = 4;
 
@@ -2414,13 +2576,158 @@ tests_auto_2d()
     }
 }
 
+
+template<typename T>
+void
+tests_auto_3d()
+{
+    typedef disk::simplicial_mesh<T, 3>  mesh_type;
+
+    // list of mesh files
+    std::vector<std::string> meshes;
+
+    // meshes.push_back("test3d_1.geo");
+    // meshes.push_back("test3d_2.geo");
+    // meshes.push_back("test3d_3.geo");
+    // meshes.push_back("test3d_4.geo");
+
+    meshes.push_back("../../../diskpp/meshes/3D_tetras/netgen/fvca6_tet1.mesh");
+    meshes.push_back("../../../diskpp/meshes/3D_tetras/netgen/fvca6_tet2.mesh");
+    meshes.push_back("../../../diskpp/meshes/3D_tetras/netgen/fvca6_tet3.mesh");
+
+    // T noise_size = 1.e-3;
+    // T noise_size = 1.e-5;
+    T noise_size = 0.;
+    size_t nb_noise_subdiv = 10;
+    mesh_type test_mesh;
+
+    auto noise_fct = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size);
+
+
+    /*********************  REFINEMENT IN SPACE  **************************/
+    if(true)
+    {
+        size_t nb_meshes = meshes.size();
+
+        // list of export files
+        std::vector<std::string> files;
+        files.push_back("./test_space_k0.txt");
+        files.push_back("./test_space_k1.txt");
+        files.push_back("./test_space_k2.txt");
+        files.push_back("./test_space_k3.txt");
+
+        // we test space degree 1 and 2 only
+        for(int s_degree=1; s_degree <= 2; s_degree++)
+        {
+            std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
+            std::cout << nocolor;
+
+            size_t t_degree = 2;
+            size_t N = 20;
+
+            // open the output file
+            std::ofstream file;
+            file.open (files.at(s_degree), std::ios::in | std::ios::trunc);
+            if (!file.is_open())
+                throw std::logic_error("file not open");
+
+            // init the file
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof\th" << std::endl;
+
+            // we test all the meshes in the list
+            for(size_t i=0; i < nb_meshes; i++)
+            {
+                mesh_type msh;
+                // disk::gmsh_geometry_loader< mesh_type > loader;
+                disk::netgen_mesh_loader<double, 3> loader;
+
+                if( !loader.read_mesh(meshes.at(i)) )
+                    std::cout << "error loading mesh !" << std::endl;
+                loader.populate_mesh(msh);
+
+                // test this mesh
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto diam = average_diameter(msh);
+
+                // write the results in the file
+                file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
+                     << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << "\t" << TI.nb_dof << "\t" << diam
+                     << std::endl;
+            }
+
+            // close the file
+            file.close();
+        }
+
+    }
+    /*********************  REFINEMENT IN TIME  **************************/
+    if(true)
+    {
+        size_t nb_meshes = 5;
+        size_t time_meshes[] = {5,10,15,20};
+
+        std::vector<std::string> files;
+        files.push_back("./test_time_k0.txt");
+        files.push_back("./test_time_k1.txt");
+        files.push_back("./test_time_k2.txt");
+        files.push_back("./test_time_k3.txt");
+
+        // we test time degree 1 and 2 only
+        for(int t_degree=1; t_degree <= 2; t_degree++)
+        {
+            std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
+            std::cout << nocolor;
+
+            size_t s_degree = 2;
+
+            // open the output file
+            std::ofstream file;
+            file.open (files.at(t_degree), std::ios::in | std::ios::trunc);
+            if (!file.is_open())
+                throw std::logic_error("file not open");
+
+            // init the file
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tz_H1\tdof\tN" << std::endl;
+
+            // we test all the meshes in the list
+            for(size_t i=0; i < nb_meshes; i++)
+            {
+                mesh_type msh;
+                size_t N = time_meshes[i];
+
+                // disk::gmsh_geometry_loader< mesh_type > loader;
+                disk::netgen_mesh_loader<double, 3> loader;
+
+
+                if( !loader.read_mesh(meshes.at(1)) )
+                    std::cout << "error loading mesh !" << std::endl;
+                loader.populate_mesh(msh);
+
+                // test this mesh
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+
+                // write the results in the file
+                file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
+                     << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
+                     << "\t" << TI.nb_dof << "\t" << N
+                     << std::endl;
+            }
+
+            // close the file
+            file.close();
+        }
+    }
+}
+
 /* run main with :
    ./wave_UC
 */
 int main(int argc, char **argv)
 {
-    tests_auto_1d<double>();
+    // tests_auto_1d<double>();
     // tests_auto_2d<double>();
+    tests_auto_3d<double>();
     return 0;
 }
 
