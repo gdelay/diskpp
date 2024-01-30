@@ -408,12 +408,15 @@ struct varpi_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const point_type& pt) const
     {
+        scalar_type varpi_left_limit = 0.5;
         scalar_type ret;
 
-        bool Ndom1 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
+        bool Ndom11 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
+        bool Ndom12 = (pt.x() >= 0.0) && (pt.x() <= varpi_left_limit) && (pt.y() >= 0.) && (pt.y() <= 1.);
+        bool Ndom1 = Ndom11 || Ndom12;
         // bool Ndom2 = (pt.y() >= 0.125) && (pt.y() <= 0.875);
         // bool Ndom3 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125);
-        bool Ndom4 = !( (pt.x() >= 0.25) && (pt.x() <= 0.75) && (pt.y() <= 0.5) );
+        // bool Ndom4 = !( (pt.x() >= 0.25) && (pt.x() <= 0.75) && (pt.y() <= 0.5) );
         if( Ndom1 )
             ret = 0.0;
         else
@@ -623,6 +626,7 @@ protected:
 
     // BC_known : true if we know the Dirichlet values of the solution, false otherwise
     // not_bnd : chosen for the .geo files in the current folder
+    //           {6,7,8,9,10,11} for all curent .geo files (index shift wrt geo file)
     wave_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
 	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(BC_known), not_bnd({6,7,8,9,10,11})
     {
@@ -1132,7 +1136,6 @@ class condensed_wave_UC_assembler : public wave_UC_assembler<Mesh>
     std::vector< vector_type > loc_RHS;
 
     // BC_known : true if we know the Dirichlet values of the solution, false otherwise
-    // not_bnd : chosen for the .geo files in the current folder
     condensed_wave_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
 	: wave_UC_assembler<Mesh>(msh, hdi, t_degree, t_steps, BC_known)
     {
@@ -2183,7 +2186,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         if(step_i % freq_exp == 0 and false) // export
         {
             // be careful : this exports a very approximated solution
-            // TODO : modify this export ...
+            // does not work if static condensation is employed
             for (size_t i = 0; i < msh.cells_size(); i++)
                 sol_silo(i) = u(i*cbs*(time_degree+1)*time_steps + cbs*(time_degree+1) * step_i);
 
@@ -2500,13 +2503,24 @@ tests_auto_2d()
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
 
-    meshes.push_back("test2d_1.geo");
-    meshes.push_back("test2d_1_5.geo");
-    meshes.push_back("test2d_2.geo");
-    meshes.push_back("test2d_2_5.geo");
-    meshes.push_back("test2d_3.geo");
-    meshes.push_back("test2d_3_5.geo");
-    meshes.push_back("test2d_4.geo");
+    // attention : do not forget to adapt varpi_function to the geometry file
+    // attention for the variable size domain : do not forget to update the .geo file
+
+    meshes.push_back("gmsh_meshes/test2d_1.geo");
+    meshes.push_back("gmsh_meshes/test2d_1_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_2.geo");
+    meshes.push_back("gmsh_meshes/test2d_2_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3.geo");
+    meshes.push_back("gmsh_meshes/test2d_3_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_4.geo");
+
+    // meshes.push_back("gmsh_meshes/test2d_1bound_1.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1bound_1_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1bound_2.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1bound_2_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1bound_3.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1bound_3_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1bound_4.geo");
 
     // T noise_size = 1.e-3;
     // T noise_size = 1.e-5;
@@ -2788,8 +2802,8 @@ tests_auto_3d()
 */
 int main(int argc, char **argv)
 {
-    tests_auto_1d<double>();
-    // tests_auto_2d<double>();
+    // tests_auto_1d<double>();
+    tests_auto_2d<double>();
     // tests_auto_3d<double>();
     return 0;
 }

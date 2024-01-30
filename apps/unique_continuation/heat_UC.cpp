@@ -1870,13 +1870,13 @@ tests_auto_2d()
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
 
-    meshes.push_back("test2d_1.geo");
-    meshes.push_back("test2d_1_5.geo");
-    meshes.push_back("test2d_2.geo");
-    meshes.push_back("test2d_2_5.geo");
-    meshes.push_back("test2d_3.geo");
-    meshes.push_back("test2d_3_5.geo");
-    meshes.push_back("test2d_4.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_1.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_1_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_2.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_2_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_3.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_3_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_target_4.geo");
 
     // T noise_size = 1.e-3;
     // T noise_size = 1.e-5;
