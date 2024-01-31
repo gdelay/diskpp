@@ -438,8 +438,8 @@ struct varpi_functor< Mesh<T, 3, Storage> >
     {
         scalar_type ret;
 
-        bool Ndom1 = pt.x() < 0.5 && pt.y() < 0.5 && pt.z() < 0.5;
-        if( Ndom1 )
+        bool Ndom1 = (pt.x() >= 0.25 && pt.x() <= 0.75) && (pt.y() >= 0.25 && pt.y() <= 0.75) && pt.z() <= 0.75;
+        if( !Ndom1 )
             ret = 1.0;
         else
             ret = 0.0;
@@ -2684,7 +2684,8 @@ tests_auto_3d()
     // list of mesh files
     std::vector<std::string> meshes;
 
-    // meshes.push_back("test3d_1.geo");
+    // Attention : gmsh meshes do not work in 3d
+    // meshes.push_back("gmsh_meshes/test3d_1.geo");
     // meshes.push_back("test3d_2.geo");
     // meshes.push_back("test3d_3.geo");
     // meshes.push_back("test3d_4.geo");
@@ -2829,8 +2830,8 @@ tests_auto_3d()
 */
 int main(int argc, char **argv)
 {
-    // tests_auto_1d<double>();
-    tests_auto_2d<double>();
+    tests_auto_1d<double>();
+    // tests_auto_2d<double>();
     // tests_auto_3d<double>();
     return 0;
 }

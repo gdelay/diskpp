@@ -33,6 +33,8 @@ if (BUILD_APP_UC)
   configure_file(gmsh_meshes/test2d_target_3_5.geo gmsh_meshes/test2d_target_3_5.geo COPYONLY)
   configure_file(gmsh_meshes/test2d_target_4.geo gmsh_meshes/test2d_target_4.geo COPYONLY)
 
+  configure_file(gmsh_meshes/test3d_1.geo gmsh_meshes/test3d_1.geo COPYONLY)
+
   add_executable(heat_UC heat_UC.cpp)
   target_link_libraries(heat_UC ${LINK_LIBS})
   add_executable(wave_UC wave_UC.cpp)
