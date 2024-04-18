@@ -542,7 +542,7 @@ auto make_B_function(const Mesh& msh)
 template<typename T>
 class test_info {
 public:
-    test_info() : H1_init(0.), H1_Om(0.) , L2_Om(0.) , H1_B(0.) , L2_B(0.) , H1_z(0.), Energy_Om(0.), tot_time(0.), ass_time(0.), solve_time(0.), post_time(0.), nb_dof_SC(0), nb_dof_no_SC(0) {}
+    test_info() : H1_init(0.), H1_Om(0.) , L2_Om(0.) , H1_B(0.) , L2_B(0.) , H1_z(0.), Energy_Om(0.), shifted_En_Om(0.), tot_time(0.), ass_time(0.), solve_time(0.), post_time(0.), nb_dof_SC(0), nb_dof_no_SC(0) {}
     T H1_init; // H1-error at initial time
     T H1_Om; // H1-error in Omega
     T L2_Om; // L2-error in Omega
@@ -550,6 +550,7 @@ public:
     T L2_B; // L2-error in B
     T H1_z; // H1-error for the dual variable
     T Energy_Om; // error in energy-norm ( L2(H1) + H1(L2) )
+    T shifted_En_Om; // error in L^inf(L^2)
     T tot_time; // CPU total time to run the program
     T ass_time; // assembly time
     T solve_time; // solving time
@@ -2173,6 +2174,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     scalar_type H1L2_error = 0.;
     scalar_type L2H1_error = 0.;
     scalar_type L2L2_error = 0.;
+    scalar_type LinfL2_error = 0.;
     scalar_type L2H1_B_error = 0.;
     scalar_type L2L2_B_error = 0.;
     scalar_type L2H1_z = 0.;
@@ -2322,6 +2324,72 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             cell_i++;
         }
+
+        // compute LinfL2_error
+        // we consider the max on all the time Gauss points
+        for(auto& qpt : qpst)
+        {
+            scalar_type L2_error_loc = 0.;
+            auto t_phi   = t_cb.eval_functions( qpt.point() );
+
+            for(auto& cl : msh) // we compute the L2-error at this Gauss point
+            {
+                /* compute the L2 projection in space and time */
+                auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
+                Matrix<scalar_type, Dynamic, 1> rhs_proj
+                    = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
+                const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
+                for(auto& qpt : qpst)
+                {
+                    auto t_phi   = t_cb.eval_functions( qpt.point() );
+                    T time_point = qpt.point().x();
+
+                    for(auto& qp : qps)
+                    {
+                        auto x_phi   = cb.eval_functions( qp.point() );
+                        for(size_t l1 = 0; l1 <= time_degree; l1++)
+                        {
+                            rhs_proj.block(l1*cbs, 0, cbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * sol_fun( time_point, qp.point() ) * x_phi;
+                        }
+                    }
+                }
+
+                // use the mass matrix to compute the coordinates of the projection
+                auto cell_mass   = make_mass_matrix(msh, cl, cb);
+                Matrix<scalar_type, Dynamic, Dynamic> mass_matrix
+                    = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs*(time_degree+1) , cbs*(time_degree+1));
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                {
+                    for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    {
+                        mass_matrix.block(l1*cbs, l2*cbs, cbs, cbs) = time_mass(l1,l2) * cell_mass;
+                    }
+                }
+                Matrix<scalar_type, Dynamic, 1> proj
+                    = Matrix<scalar_type, Dynamic, 1>::Zero( cbs * (time_degree+1) );
+                LLT< Matrix<scalar_type, Dynamic, Dynamic> > mat_llt;
+                mat_llt.compute(mass_matrix);
+                proj = mat_llt.solve(rhs_proj);
+                auto loc_sol = assembler.take_local_solution(msh, cl, step_i, u, sol_fun);
+
+                // coordinates of the primal error (cell components)
+                Matrix<scalar_type, Dynamic, 1> diff
+                    = loc_sol.block(0, 0, cbs*(time_degree+1), 1) - proj;
+
+                // update L2-error
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                    for(size_t l2 = 0; l2 <= time_degree; l2++)
+                        for(size_t I = 0; I < cbs; I++)
+                            for(size_t J = 0; J < cbs; J++)
+                            {
+                                L2_error_loc += diff(l1 * cbs + I) * diff(l2 * cbs + J) * cell_mass(I,J) * t_phi[l1] * t_phi[l2];
+                            }
+            }
+
+            // update LinfL2_error
+            if(LinfL2_error < L2_error_loc) LinfL2_error = L2_error_loc;
+        }
+
         t += dt;
     } // time loop
 
@@ -2339,6 +2407,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     TI.H1_Om = std::sqrt(L2H1_error);
     TI.L2_Om = std::sqrt(L2L2_error);
     TI.Energy_Om = std::sqrt(L2H1_error + H1L2_error);
+    TI.shifted_En_Om = std::sqrt(LinfL2_error);
     TI.H1_B = std::sqrt(L2H1_B_error);
     TI.L2_B = std::sqrt(L2L2_B_error);
     TI.H1_z = std::sqrt(L2H1_z);
@@ -2417,7 +2486,7 @@ tests_auto_1d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\th\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tOmega_sEn\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\th\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
 
             // we test all the meshes in the list
             size_t num_elems = 8;
@@ -2437,7 +2506,8 @@ tests_auto_1d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t"
-                     << TI.Energy_Om << "\t" << TI.H1_init << "\t" << TI.H1_z
+                     << TI.Energy_Om << "\t" << TI.shifted_En_Om << "\t"
+                     << TI.H1_init << "\t" << TI.H1_z
                      << "\t" << TI.nb_dof_SC << "\t" << TI.nb_dof_no_SC << "\t" << diam
                      << "\t" << TI.ass_time << "\t" << TI.solve_time << "\t" << TI.post_time
                      << "\t" << TI.tot_time
@@ -2476,7 +2546,7 @@ tests_auto_1d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\tN\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tOmega_sEn\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\tN\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
 
             // we test all the meshes in the list
             size_t N = 5;
@@ -2494,7 +2564,8 @@ tests_auto_1d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t"
-                     << TI.Energy_Om << "\t" << TI.H1_init << "\t" << TI.H1_z
+                     << TI.Energy_Om << "\t" << TI.shifted_En_Om << "\t"
+                     << TI.H1_init << "\t" << TI.H1_z
                      << "\t" << TI.nb_dof_SC << "\t" << TI.nb_dof_no_SC << "\t" << N
                      << "\t" << TI.ass_time << "\t" << TI.solve_time << "\t" << TI.post_time
                      << "\t" << TI.tot_time
@@ -2578,7 +2649,7 @@ tests_auto_2d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\th\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tOmega_sEn\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\th\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
 
             // we test all the meshes in the list
             for(size_t i=0; i < nb_meshes; i++)
@@ -2600,7 +2671,8 @@ tests_auto_2d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t"
-                     << TI.Energy_Om << "\t" << TI.H1_init << "\t" << TI.H1_z
+                     << TI.Energy_Om << "\t" << TI.shifted_En_Om << "\t"
+                     << TI.H1_init << "\t" << TI.H1_z
                      << "\t" << TI.nb_dof_SC << "\t" << TI.nb_dof_no_SC << "\t" << diam
                      << "\t" << TI.ass_time << "\t" << TI.solve_time << "\t" << TI.post_time
                      << "\t" << TI.tot_time
@@ -2639,7 +2711,7 @@ tests_auto_2d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\tN\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tOmega_sEn\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\tN\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
 
             // we test all the meshes in the list
             for(size_t i=0; i < nb_meshes; i++)
@@ -2661,7 +2733,8 @@ tests_auto_2d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t"
-                     << TI.Energy_Om << "\t" << TI.H1_init << "\t" << TI.H1_z
+                     << TI.Energy_Om << "\t" << TI.shifted_En_Om << "\t"
+                     << TI.H1_init << "\t" << TI.H1_z
                      << "\t" << TI.nb_dof_SC << "\t" << TI.nb_dof_no_SC << "\t" << N
                      << "\t" << TI.ass_time << "\t" << TI.solve_time << "\t" << TI.post_time
                      << "\t" << TI.tot_time
@@ -2731,7 +2804,7 @@ tests_auto_3d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\th\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tOmega_sEn\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\th\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
 
             // we test all the meshes in the list
             for(size_t i=0; i < nb_meshes; i++)
@@ -2751,7 +2824,8 @@ tests_auto_3d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t"
-                     << TI.Energy_Om << "\t" << TI.H1_init << "\t" << TI.H1_z
+                     << TI.Energy_Om << "\t" << TI.shifted_En_Om << "\t"
+                     << TI.H1_init << "\t" << TI.H1_z
                      << "\t" << TI.nb_dof_SC << "\t" << TI.nb_dof_no_SC << "\t" << diam
                      << "\t" << TI.ass_time << "\t" << TI.solve_time << "\t" << TI.post_time
                      << "\t" << TI.tot_time
@@ -2790,7 +2864,7 @@ tests_auto_3d()
                 throw std::logic_error("file not open");
 
             // init the file
-            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\tN\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
+            file << "N\tB_L2\tB_H1\tOmega_L2\tOmega_H1\tOmega_En\tOmega_sEn\tinit_H1\tz_H1\tdof_SC\tdof_no_SC\tN\tt_ass\tt_solve\tt_post\tt_tot" << std::endl;
 
             // we test all the meshes in the list
             for(size_t i=0; i < nb_meshes; i++)
@@ -2812,7 +2886,8 @@ tests_auto_3d()
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t"
-                     << TI.Energy_Om << "\t" << TI.H1_init << "\t" << TI.H1_z
+                     << TI.Energy_Om << "\t" << TI.shifted_En_Om << "\t"
+                     << TI.H1_init << "\t" << TI.H1_z
                      << "\t" << TI.nb_dof_SC << "\t" << TI.nb_dof_no_SC << "\t" << N
                      << "\t" << TI.ass_time << "\t" << TI.solve_time << "\t" << TI.post_time
                      << "\t" << TI.tot_time
