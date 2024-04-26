@@ -285,7 +285,9 @@ struct rhs_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return M_PI * M_PI * std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+        // int k = 2;
+        // return M_PI * M_PI * std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+        return 0.;
     }
 };
 
@@ -342,7 +344,9 @@ struct solution_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+        int k = 2;
+        return std::cos(std::sqrt(2)*M_PI*k*t) * std::sin(M_PI*k*pt.x()) * std::sin(M_PI*k*pt.y());
+        // return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
     }
 };
 
@@ -408,7 +412,7 @@ struct varpi_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const point_type& pt) const
     {
-        scalar_type varpi_left_limit = 0.5;
+        scalar_type varpi_left_limit = 0.;
         scalar_type ret;
 
         bool Ndom11 = (pt.x() >= 0.0) && (pt.x() <= 0.875) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
@@ -494,7 +498,7 @@ struct B_functor< Mesh<T, 2, Storage> >
     scalar_type operator()(const point_type& pt) const
     {
         scalar_type ret;
-        scalar_type varpi_left_limit = 0.5;
+        scalar_type varpi_left_limit = 0.;
 
         // bool Ndom1 = (pt.x() >= 0.0) && (pt.x() <= 0.125) && (pt.y() >= 0.125) && (pt.y() <= 0.875);
         // bool Ndom2 = (pt.y() >= 0.125) && (pt.y() <= 0.875) &&
@@ -2487,7 +2491,7 @@ tests_auto_1d()
         files.push_back("./test_space_k3.txt");
 
         // we test space degrees from 1 to 3
-        for(int s_degree=1; s_degree < 4; s_degree++)
+        for(int s_degree=2; s_degree < 4; s_degree++)
         {
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
@@ -2614,13 +2618,21 @@ tests_auto_2d()
     // attention : do not forget to adapt varpi_function to the geometry file
     // attention for the variable size domain : do not forget to update the .geo file
 
-    meshes.push_back("gmsh_meshes/test2d_1.geo");
-    meshes.push_back("gmsh_meshes/test2d_1_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_2.geo");
-    meshes.push_back("gmsh_meshes/test2d_2_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_3.geo");
-    meshes.push_back("gmsh_meshes/test2d_3_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_4.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1.geo");
+    // meshes.push_back("gmsh_meshes/test2d_1_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_2.geo");
+    // meshes.push_back("gmsh_meshes/test2d_2_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_4.geo");
+
+    meshes.push_back("gmsh_meshes/test2d_3bound_1.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_1_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_2.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_2_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_3.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_3_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_4.geo");
 
     // meshes.push_back("gmsh_meshes/test2d_1bound_1.geo");
     // meshes.push_back("gmsh_meshes/test2d_1bound_1_5.geo");
@@ -2652,12 +2664,12 @@ tests_auto_2d()
         files.push_back("./test_space_k3.txt");
 
         // we test space degree 1 and 2 only
-        for(int s_degree=1; s_degree <= 2; s_degree++)
+        for(int s_degree=2; s_degree <= 2; s_degree++)
         {
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 1;
+            size_t t_degree = 3;
             size_t N = 20;
 
             // open the output file
@@ -2927,8 +2939,8 @@ tests_auto_3d()
 */
 int main(int argc, char **argv)
 {
-    tests_auto_1d<double>();
-    // tests_auto_2d<double>();
+    // tests_auto_1d<double>();
+    tests_auto_2d<double>();
     // tests_auto_3d<double>();
     return 0;
 }
