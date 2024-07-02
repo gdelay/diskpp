@@ -1696,7 +1696,7 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 
 template<typename Mesh, typename NR>
 test_info<typename Mesh::coordinate_type>
-UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree, NR noise_fct)
+UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_degree, NR noise_fct_varpi, NR noise_fct_f)
 {
     typedef typename Mesh::coordinate_type  scalar_type;
     typedef typename Mesh::point_type       point_type;
@@ -2013,10 +2013,6 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             const auto qps = integrate(msh, cl, 2*hdi.cell_degree());
             auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
 
-            // T noise_size = 0.;
-            // T noise_size = 0.001;
-            T noise_size = 1.e-5;
-
             // wave equation RHS
             for(auto& qpt : qpst) // time integration
             {
@@ -2027,8 +2023,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 {
                     auto x_phi   = cb.eval_functions( qp.point() );
 
-                    // T noise = noise_size * ((std::rand() % 200)-100) * 0.01;
-                    T noise = 0.0;
+                    T noise = noise_fct_f( time_point , qp.point() );
                     T noised_data = rhs_fun( time_point , qp.point() ) + noise;
 
                     for(size_t l1 = 0; l1 <= time_degree; l1++) // loop on time dofs
@@ -2057,9 +2052,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                     {
                         auto x_phi   = cb.eval_functions( qp.point() );
 
-                        T noise = noise_fct( time_point , qp.point() );
-                        // T noise = noise_size * ((std::rand() % 200)-100) * 0.01;
-                        // T noise = 0.0;
+                        T noise = noise_fct_varpi( time_point , qp.point() );
                         T noised_data = sol_fun( time_point , qp.point() ) + noise;
 
                         // export noise level
@@ -2469,13 +2462,15 @@ tests_auto_1d()
     typedef disk::generic_mesh<T, 1>  mesh_type;
 
 
-    // T noise_size = 1.e-3;
-    // T noise_size = 1.e-5;
-    T noise_size = 0.;
+    // T noise_size_varpi = 1.e-3;
+    // T noise_size_varpi = 1.e-5;
+    T noise_size_varpi = 0.;
+    T noise_size_f = 0.;
     size_t nb_noise_subdiv = 10;
     mesh_type test_mesh;
 
-    auto noise_fct = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size);
+    auto noise_fct_varpi = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size_varpi);
+    auto noise_fct_f = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size_f);
 
     /*********************  REFINEMENT IN SPACE  **************************/
     if(true)
@@ -2519,7 +2514,7 @@ tests_auto_1d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct_varpi, noise_fct_f);
 
                 auto diam = average_diameter(msh);
 
@@ -2580,7 +2575,7 @@ tests_auto_1d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct_varpi, noise_fct_f);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -2642,13 +2637,15 @@ tests_auto_2d()
     // meshes.push_back("gmsh_meshes/test2d_1bound_3_5.geo");
     // meshes.push_back("gmsh_meshes/test2d_1bound_4.geo");
 
-    // T noise_size = 1.e-3;
-    // T noise_size = 1.e-5;
-    T noise_size = 0.;
+    // T noise_size_varpi = 1.e-3;
+    // T noise_size_varpi = 1.e-5;
+    T noise_size_varpi = 0.;
+    T noise_size_f = 0.;
     size_t nb_noise_subdiv = 10;
     mesh_type test_mesh;
 
-    auto noise_fct = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size);
+    auto noise_fct_varpi = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size_varpi);
+    auto noise_fct_f = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size_f);
 
 
     /*********************  REFINEMENT IN SPACE  **************************/
@@ -2694,7 +2691,7 @@ tests_auto_2d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct_varpi, noise_fct_f);
 
                 auto diam = average_diameter(msh);
 
@@ -2759,7 +2756,7 @@ tests_auto_2d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct_varpi, noise_fct_f);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
@@ -2799,13 +2796,15 @@ tests_auto_3d()
     meshes.push_back("../../../diskpp/meshes/3D_tetras/netgen/fvca6_tet2.mesh");
     meshes.push_back("../../../diskpp/meshes/3D_tetras/netgen/fvca6_tet3.mesh");
 
-    // T noise_size = 1.e-3;
-    // T noise_size = 1.e-5;
-    T noise_size = 0.;
+    // T noise_size_varpi = 1.e-3;
+    // T noise_size_varpi = 1.e-5;
+    T noise_size_varpi = 0.;
+    T noise_size_f = 0.;
     size_t nb_noise_subdiv = 10;
     mesh_type test_mesh;
 
-    auto noise_fct = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size);
+    auto noise_fct_varpi = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size_varpi);
+    auto noise_fct_f = make_noise_representation(test_mesh, nb_noise_subdiv, noise_size_f);
 
 
     /*********************  REFINEMENT IN SPACE  **************************/
@@ -2850,7 +2849,7 @@ tests_auto_3d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct_varpi, noise_fct_f);
                 auto diam = average_diameter(msh);
 
                 // write the results in the file
@@ -2914,7 +2913,7 @@ tests_auto_3d()
                 loader.populate_mesh(msh);
 
                 // test this mesh
-                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct);
+                auto TI = UC_wave_solver(msh, s_degree, N, t_degree, noise_fct_varpi, noise_fct_f);
 
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
