@@ -194,6 +194,64 @@ auto make_line_noise_file(const Mesh& msh)
 
 
 //////////////////   test case   ///////////////////
+/* finite dimensional trace space at initial time */
+template<typename Mesh>
+struct finite_trace_init;
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct finite_trace_init< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    typedef Matrix<scalar_type, Dynamic, 1> function_type;
+    typedef Matrix<scalar_type, Dynamic, Dynamic>  matrix_type;
+
+    size_t basis_size;
+
+    // constructor
+    finite_trace_init(size_t basis_size) : basis_size(basis_size) {}
+
+    function_type
+    eval_functions(const point_type& pt) const
+    {
+        function_type ret = function_type::Zero(basis_size);
+
+        // choose the basis functions here
+        for (size_t k = 0; k < basis_size; k++)
+            ret(k) = std::sqrt(2) * std::sin((k+1)*M_PI*pt.x());
+
+        return ret;
+    }
+
+    // compute the mass matrix associated to this basis
+    matrix_type
+    make_mass_matrix(const mesh_type& msh) const
+    {
+        matrix_type mass_mat = matrix_type::Zero(basis_size,basis_size);
+
+        for(auto& cl : msh) {
+            // in some particular cases, the matrix is identity
+            return matrix_type::Identity(basis_size, basis_size);
+            // compute local mass matrices
+            const auto qps = integrate(msh, cl, 4); // 4 is the integration degree here
+            for (auto& qp : qps)
+            {
+                const auto phi = eval_functions(qp.point());
+                mass_mat += qp.weight() * phi * phi.transpose();
+            }
+        }
+
+        return mass_mat;
+    }
+};
+
+template<typename Mesh>
+auto make_finite_trace_init(const Mesh& msh, size_t nb_basis)
+{
+    return finite_trace_init<Mesh>(nb_basis);
+}
+
 /* RHS definition */
 template<typename Mesh>
 struct rhs_functor;
@@ -1074,6 +1132,50 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
     return ret;
 }
 
+/****************************************************************/
+/**********      Finite trace penalizations       ***************/
+// compute the q0 term for penalization at initial time
+// this has to be applied to basis functions at initial time (!)
+template<typename Mesh>
+Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic>
+make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl,
+        Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> mass_matrix,
+        finite_trace_init<Mesh> finite_space,
+        const hho_degree_info& di)
+{
+    using T = typename Mesh::coordinate_type;
+    typedef Matrix<T, Dynamic, Dynamic> matrix_type;
+
+    const auto celdeg = di.cell_degree();
+    const auto cb = make_scalar_monomial_basis(msh, cl, celdeg);
+
+    size_t dim_finite_space = mass_matrix.rows();
+    const auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
+
+    // compute the L2-projection on the finite dim space
+    // F is the rhs of the projection
+    matrix_type F = matrix_type::Zero(dim_finite_space, cbs);
+    const auto qps = integrate(msh, cl, 2*celdeg);
+    for (auto& qp : qps)
+    {
+        const auto c_phi = cb.eval_functions(qp.point());
+        const auto fs_phi = finite_space.eval_functions(qp.point());
+
+        F += qp.weight() * fs_phi * c_phi.transpose();
+    }
+
+    // P is the coefficients vector of the proj in the finite space
+    matrix_type P = matrix_type::Zero(dim_finite_space, cbs);
+    LLT< Matrix<T, Dynamic, Dynamic> > mat_llt;
+    mat_llt.compute(mass_matrix);
+    P = mat_llt.solve(F);
+
+    // compute the local cell mass matrix
+    auto mass_cell   = make_mass_matrix(msh, cl, cb);
+
+    return mass_cell - P.transpose()*F;
+}
+
 ///////////////////////////////////////////////
 
 template<typename Mesh, typename NR>
@@ -1099,6 +1201,10 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     timecounter tc;
 
     scalar_type final_time = 2.;
+
+    // finite trace elements
+    auto finite_trace_init = make_finite_trace_init(msh, 1);
+    auto mass_init = finite_trace_init.make_mass_matrix(msh);
 
     auto rhs_fun = make_rhs_function(msh);
     auto sol_fun = make_solution_function(msh);
@@ -1479,6 +1585,18 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 rhs.block(0, 0, cbs*(time_degree+1), 1) = data_rhs;
             }
 
+            /* finite trace terms */
+            // initial finite trace
+            if(step_i == 0 and true)
+            {
+                auto lhs2 = lhs;
+                auto mat_space_q0 = make_space_q0(msh, cl, mass_init, finite_trace_init, hdi);
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                    for(size_t l2 = 0; l2 <= time_degree; l2++)
+                        lhs2.block(l1*cbs, l2*cbs, cbs, cbs) += mat_space_q0 * time_loc(l1,l2);
+                assembler.assemble(msh, cl, step_i, lhs2, rhs);
+                continue;
+            }
             assembler.assemble(msh, cl, step_i, lhs, rhs);
         }
 
