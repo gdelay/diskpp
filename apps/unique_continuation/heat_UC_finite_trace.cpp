@@ -252,6 +252,91 @@ auto make_finite_trace_init(const Mesh& msh, size_t nb_basis)
     return finite_trace_init<Mesh>(nb_basis);
 }
 
+/* finite dimensional trace space on the boundary */
+template<typename Mesh>
+struct finite_trace_bound;
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct finite_trace_bound< Mesh<T, 1, Storage> >
+{
+    typedef Mesh<T,1,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    typedef Matrix<scalar_type, Dynamic, 1> function_type;
+    typedef Matrix<scalar_type, Dynamic, Dynamic>  matrix_type;
+
+    size_t basis_size;
+
+    // constructor
+    finite_trace_bound(size_t basis_size) : basis_size(basis_size) {}
+
+    function_type
+    eval_functions(const T t, const point_type& pt) const
+    {
+        function_type ret = function_type::Zero(basis_size);
+
+        // choose the basis functions here
+        for (size_t k = 0; k < basis_size; k++)
+            ret(k) = std::sqrt(0.5) * std::sin(0.5*(k+1)*M_PI*t);
+            // ret(k) = std::sqrt(0.5) * std::cos(0.5*(k+1)*M_PI*t);
+
+        return ret;
+    }
+
+    // compute the mass matrix associated to this basis
+    matrix_type
+    make_mass_matrix(const mesh_type& msh, const disk::generic_mesh<T, 1>& time_msh) const
+    {
+        matrix_type mass_mat = matrix_type::Zero(basis_size,basis_size);
+
+        for(auto& cl : msh) {
+            // in some particular cases, the matrix is identity
+            // return matrix_type::Identity(basis_size, basis_size);
+
+            // dirichlet faces
+            auto is_dirichlet = [&](const typename mesh_type::face_type& fc) -> bool
+                                {
+                                    auto bar = barycenter(msh,fc);
+                                    if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 )
+                                        return true;
+                                    return false;
+                                };
+            const auto fcs    = faces(msh, cl);
+            for (size_t face_i = 0; face_i < fcs.size(); face_i++)
+            {
+                const auto fc = fcs[face_i];
+                if(!is_dirichlet(fc)) // loop on the dirichlet faces
+                    continue;
+
+                // compute the local contributions to the mass matrix
+                for(auto& t_cl : time_msh)
+                {
+                    const auto qps_t = integrate(time_msh, t_cl, 4); // 4 is the integration degree here
+                    const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
+
+                    // compute the local contribution to the mass matrix
+                    for (auto& qpt : qps_t)
+                    {
+                        for (auto& qpf : qps_f)
+                        {
+                            const auto phi = eval_functions(qpt.point().x(), qpf.point());
+                            mass_mat += qpt.weight() * qpf.weight() * phi * phi.transpose();
+                        }
+                    }
+                }
+            }
+        }
+
+        return mass_mat;
+    }
+};
+
+template<typename Mesh>
+auto make_finite_trace_bound(const Mesh& msh, size_t nb_basis)
+{
+    return finite_trace_bound<Mesh>(nb_basis);
+}
+
 /* RHS definition */
 template<typename Mesh>
 struct rhs_functor;
@@ -1202,22 +1287,25 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     scalar_type final_time = 2.;
 
-    // finite trace elements
-    auto finite_trace_init = make_finite_trace_init(msh, 1);
-    auto mass_init = finite_trace_init.make_mass_matrix(msh);
-
-    auto rhs_fun = make_rhs_function(msh);
-    auto sol_fun = make_solution_function(msh);
-
-    auto varpi_fun = make_varpi_function(msh);
-    auto B_fun = make_B_function(msh);
-
+    // time mesh
     cout << "time_steps = " << time_steps << endl;
     scalar_type dt = final_time/time_steps;
     cout << "dt = " << dt << endl;
     disk::generic_mesh<T, 1>  time_mesh;
     disk::uniform_mesh_loader<T, 1> time_loader(0, final_time, time_steps);
     time_loader.populate_mesh(time_mesh);
+
+    // finite trace elements
+    auto finite_trace_init = make_finite_trace_init(msh, 1);
+    auto mass_init = finite_trace_init.make_mass_matrix(msh);
+    auto finite_trace_bound = make_finite_trace_bound(msh,3);
+    auto mass_bound = finite_trace_bound.make_mass_matrix(msh, time_mesh);
+
+    auto rhs_fun = make_rhs_function(msh);
+    auto sol_fun = make_solution_function(msh);
+
+    auto varpi_fun = make_varpi_function(msh);
+    auto B_fun = make_B_function(msh);
 
     auto time_cell = *time_mesh.cells_begin();
     auto next_time_cell = *(++time_mesh.cells_begin());
