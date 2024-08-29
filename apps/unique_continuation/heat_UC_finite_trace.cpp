@@ -1928,6 +1928,35 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     TI.L2_B = std::sqrt(L2L2_B_error);
     TI.H1_z = std::sqrt(L2H1_z);
 
+
+    /** export solution with gnuplot for 1d meshes **/
+    if(Mesh::dimension > 1)
+        return TI;
+
+    // open file
+    std::ofstream gnu_file("gnu_solution.txt", std::ios::out | std::ios::trunc);
+    if(!gnu_file)
+        std::cerr << "error opening file !!" << std::endl;
+
+    for(int step_i = 0; step_i < time_steps; step_i++) { // time loop
+        T time_point = (step_i+0.5)*dt;
+        size_t cell_i = 0;
+        for (auto& cl : msh) { // loop on the mesh cells
+            Matrix<scalar_type, Dynamic, 1> loc_sol
+                = u.block(cell_i*cbs*(time_degree+1)*time_steps + cbs * (time_degree+1) * step_i, 0, cbs, 1);
+            auto cb     = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
+            const auto qps = integrate(msh, cl, 1); // degree 1
+            for (auto& qp : qps)
+            {
+                auto x_phi   = cb.eval_functions( qp.point() );
+                T sol = x_phi.transpose() * loc_sol;
+                gnu_file << qp.point().x() << " " << time_point << " " << sol << endl;
+            }
+
+            cell_i++;
+        }
+    }
+
     return TI;
 }
 
