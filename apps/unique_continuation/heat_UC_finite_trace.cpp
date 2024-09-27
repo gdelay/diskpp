@@ -219,7 +219,11 @@ struct finite_trace_init< Mesh<T, 1, Storage> >
 
         // choose the basis functions here
         for (size_t k = 0; k < basis_size; k++)
-            ret(k) = std::sqrt(2) * std::sin((k+1)*M_PI*pt.x());
+        {
+            // ret(k) = std::sqrt(2) * std::sin((k+1)*M_PI*pt.x());
+            // ret(k) = std::sqrt(2) * std::cos((k+1)*M_PI*pt.x());
+            ret(k) = 1.;
+        }
 
         return ret;
     }
@@ -228,11 +232,11 @@ struct finite_trace_init< Mesh<T, 1, Storage> >
     matrix_type
     make_mass_matrix(const mesh_type& msh) const
     {
-        matrix_type mass_mat = matrix_type::Zero(basis_size,basis_size);
+        // in some particular cases, the matrix is identity
+        return matrix_type::Identity(basis_size, basis_size);
 
+        matrix_type mass_mat = matrix_type::Zero(basis_size,basis_size);
         for(auto& cl : msh) {
-            // in some particular cases, the matrix is identity
-            return matrix_type::Identity(basis_size, basis_size);
             // compute local mass matrices
             const auto qps = integrate(msh, cl, 4); // 4 is the integration degree here
             for (auto& qp : qps)
@@ -277,10 +281,20 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
 
         // choose the basis functions here
         for (size_t k = 0; k < basis_size; k++)
-            ret(k) = std::sqrt(0.5) * std::sin(0.5*(k+1)*M_PI*t);
+        {
+            // ret(k) = std::cos(0.5*(k+1)*M_PI*t) * std::cos(0.5*(k+1)*M_PI*pt.x());
+            // ret(k) = pt.x();
             // ret(k) = std::sqrt(0.5) * std::cos(0.5*(k+1)*M_PI*t);
+            ret(k) = 1.;
+        }
 
         return ret;
+    }
+    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::face_type& fc) {
+        auto bar = barycenter(msh,fc);
+        if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 )
+            return true;
+        return false;
     }
 
     // compute the mass matrix associated to this basis
@@ -293,19 +307,11 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
             // in some particular cases, the matrix is identity
             // return matrix_type::Identity(basis_size, basis_size);
 
-            // dirichlet faces
-            auto is_dirichlet = [&](const typename mesh_type::face_type& fc) -> bool
-                                {
-                                    auto bar = barycenter(msh,fc);
-                                    if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 )
-                                        return true;
-                                    return false;
-                                };
             const auto fcs    = faces(msh, cl);
             for (size_t face_i = 0; face_i < fcs.size(); face_i++)
             {
                 const auto fc = fcs[face_i];
-                if(!is_dirichlet(fc)) // loop on the dirichlet faces
+                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
                     continue;
 
                 // compute the local contributions to the mass matrix
@@ -351,9 +357,12 @@ struct rhs_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        // return 0.0;
+        return 0.0;
         // return M_PI*M_PI*std::sin( M_PI * pt.x() );
-        return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
+        // return ( M_PI*M_PI*std::sin(M_PI * t) + M_PI * std::cos(M_PI * t) ) * std::sin( M_PI * pt.x() );
+        // return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
+        // return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::cos( M_PI * pt.x() );
+        // return 0.;
     }
 };
 
@@ -395,7 +404,11 @@ struct solution_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        return std::sin( M_PI * pt.x() ) * std::cos(M_PI * t);
+        // return std::sin( M_PI * pt.x() ) * std::sin(M_PI * t);
+        // return std::sin( M_PI * pt.x() ) * std::cos(M_PI * t);
+        // return std::cos( M_PI * pt.x() ) * std::cos(M_PI * t);
+        // return pt.x();
+        return 1.0;
     }
 };
 
@@ -1258,7 +1271,133 @@ make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl,
     // compute the local cell mass matrix
     auto mass_cell   = make_mass_matrix(msh, cl, cb);
 
+    // cout << "h = " << diameter(msh, cl) << endl;
+    // cout << "F = " << F << std::endl;
+    // cout << "P = " << P << std::endl;
+    // cout << "P.transpose()*F = " << P.transpose()*F << endl;
+    // cout << "mass_cell = " << mass_cell << endl;
+
+
     return mass_cell - P.transpose()*F;
+    // return mass_cell;
+}
+
+
+// compute the q_{\partial} term for penalization on the boundary
+template<typename Mesh>
+Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic>
+make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl,
+             const disk::generic_mesh<typename Mesh::coordinate_type, 1>& time_msh,
+             const typename disk::generic_mesh<typename Mesh::coordinate_type, 1>::cell_type& time_cell,
+             Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> mass_matrix,
+             finite_trace_bound<Mesh> finite_space,
+             Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_mass,
+             Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_stiffness,
+             const hho_degree_info& di)
+{
+    using T = typename Mesh::coordinate_type;
+    typedef Matrix<T, Dynamic, Dynamic> matrix_type;
+
+    size_t dim_finite_space = mass_matrix.rows();
+    const auto celdeg = di.cell_degree();
+    const auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
+    const auto cb = make_scalar_monomial_basis(msh, cl, celdeg);
+    const size_t time_degree = time_mass.rows()-1;
+
+    const auto fcs = faces(msh, cl);
+    const auto num_faces = howmany_faces(msh, cl);
+
+    auto t_cb = make_scalar_monomial_basis(time_msh, time_cell, time_degree);
+
+    bool cl_on_boundary = false;
+
+    // compute the L2-projection on the finite dim space
+    // F is the rhs of the projection
+    matrix_type F = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
+
+    for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
+    {
+        auto fc = fcs[face_i];
+        if( !finite_space.is_dirichlet(msh, fc) or abs(barycenter(msh,fc).x()) < 1e-8 )  // ATTENTION : modif cette condition pour tests
+            continue;
+
+        // cout << "on boundary : x = " << barycenter(msh, fc) << endl;
+
+        cl_on_boundary = true;
+
+        // compute rhs proj contrib
+        const auto qps_f = integrate(msh, fc, 2*celdeg);
+        const auto qps_t = integrate(time_msh, time_cell, 2*time_degree);
+
+        for (auto& qpf : qps_f)
+        {
+            const auto cf_phi = cb.eval_functions(qpf.point());
+            for (auto& qpt : qps_t)
+            {
+                const auto ct_phi = t_cb.eval_functions(qpt.point());
+                const auto fs_phi = finite_space.eval_functions(qpt.point().x(), qpf.point());
+
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                    F.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_phi[l1] * fs_phi * cf_phi.transpose();
+            }
+        }
+    }
+
+    if( !cl_on_boundary )
+        return matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
+
+    // P is the coefficients vector of the proj in the finite space
+    matrix_type P = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
+    LLT< Matrix<T, Dynamic, Dynamic> > mat_llt;
+    mat_llt.compute(mass_matrix);
+    P = mat_llt.solve(F);
+
+    cout << "barycenter(msh,cl) = " << barycenter(msh,cl) << endl;
+    cout << "barycenter(time_msh,time_cell) = " << barycenter(time_msh,time_cell) << endl;
+    cout << "diameter(time_msh, time_cell) = " << diameter(time_msh, time_cell) << endl;
+    cout << "F = " << F << endl;
+    cout << "P = " << P << endl;
+
+    matrix_type ret = matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
+
+
+    
+    matrix_type trace_f = matrix_type::Zero(cbs,cbs);
+
+    for(size_t face_i = 0; face_i < num_faces; face_i++)
+    {
+        auto fc = fcs[face_i];
+        if( !finite_space.is_dirichlet(msh, fc) )
+            continue;
+
+        const auto qps_f = integrate(msh, fc, 2*celdeg);
+        for (auto& qpf : qps_f)
+        {
+            auto cf_phi = cb.eval_functions(qpf.point());
+
+            trace_f += qpf.weight() * cf_phi * cf_phi.transpose();
+            // cout << "cf_phi = " << cf_phi << endl;
+        }
+    }
+
+    // cout << " trace_f = " << trace_f << endl;
+
+    for(size_t l1 = 0; l1 <= time_degree; l1++)
+    {
+        for(size_t l2 = 0; l2 <= time_degree; l2++)
+        {
+            ret.block(l1*cbs,l2*cbs,cbs,cbs) += time_mass(l1,l2) * trace_f;
+        }
+    }
+    cout << "time_mass = " << time_mass << endl << endl;
+    cout << "trace_f_time = " << ret << endl << endl;
+    cout << "PF = " << P.transpose()*F << endl << endl;
+    cout << "ret = " << ret - P.transpose()*F << endl << endl;
+
+    // Verifier les calculs de F et P dans des cas simples
+
+    // return matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
+    return ret - P.transpose()*F;
 }
 
 ///////////////////////////////////////////////
@@ -1298,8 +1437,9 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     // finite trace elements
     auto finite_trace_init = make_finite_trace_init(msh, 1);
     auto mass_init = finite_trace_init.make_mass_matrix(msh);
-    auto finite_trace_bound = make_finite_trace_bound(msh,3);
+    auto finite_trace_bound = make_finite_trace_bound(msh, 1);
     auto mass_bound = finite_trace_bound.make_mass_matrix(msh, time_mesh);
+    // cout << "mass_bound = " << mass_bound << endl;
 
     auto rhs_fun = make_rhs_function(msh);
     auto sol_fun = make_solution_function(msh);
@@ -1313,6 +1453,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto time_cb = make_scalar_monomial_basis(time_mesh, time_cell, time_degree);
     auto time_cb_next = make_scalar_monomial_basis(time_mesh, next_time_cell, time_degree);
     auto time_mass = make_mass_matrix(time_mesh, time_cell, time_cb);
+    auto time_stiff   = make_stiffness_matrix(time_mesh, time_cell, time_cb);
 
     ////// time derivative term
     Matrix<T, Dynamic, Dynamic> time_deriv = Matrix<T, Dynamic, Dynamic>::Zero(time_degree+1, time_degree+1);
@@ -1368,6 +1509,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     for(int k=0; k < hdi.cell_degree(); k++) hk *= h_max;
 
     T Tikhonov_coeff = hk + dtl * sqrt(dt);
+    // Tikhonov_coeff *= h_max; // a enlever -> tests
 
     tc.tic();
 
@@ -1675,6 +1817,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             /* finite trace terms */
             // initial finite trace
+            // auto lhs2 = lhs;
             if(step_i == 0 and true)
             {
                 auto lhs2 = lhs;
@@ -1682,9 +1825,19 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 for(size_t l1 = 0; l1 <= time_degree; l1++)
                     for(size_t l2 = 0; l2 <= time_degree; l2++)
                         lhs2.block(l1*cbs, l2*cbs, cbs, cbs) += mat_space_q0 * time_loc(l1,l2);
+
                 assembler.assemble(msh, cl, step_i, lhs2, rhs);
                 continue;
             }
+            // boundary finite trace (uses only cell unknowns)
+            // auto q_bound = make_q_bound(msh, cl, time_mesh, t_cell, mass_bound, finite_trace_bound, time_mass, time_stiff, hdi);
+            // cout << " q_bound = " << q_bound << endl << endl;
+            // // // cout << "q_bound.rows() = " << q_bound.rows() << "   cbs*(time_degree+1) = " << cbs*(time_degree+1) << endl;
+            // cout << "lhs2 before = " << lhs2 << endl << endl;
+            // lhs2.block(0, 0, cbs*(time_degree+1), cbs*(time_degree+1)) += q_bound;
+            // cout << "lhs2 after = " << lhs2 << endl << endl;
+
+            // assembler.assemble(msh, cl, step_i, lhs2, rhs);
             assembler.assemble(msh, cl, step_i, lhs, rhs);
         }
 
@@ -1980,7 +2133,7 @@ tests_auto_1d()
     /*********************  REFINEMENT IN SPACE  **************************/
     if(true)
     {
-        size_t nb_meshes = 4;
+        size_t nb_meshes = 5;
 
 
         // list of export files
@@ -1991,12 +2144,12 @@ tests_auto_1d()
         files.push_back("./test_space_k3.txt");
 
         // we test space degrees from 1 to 3
-        for(int s_degree=1; s_degree < 4; s_degree++)
+        for(int s_degree=1; s_degree < 2; s_degree++)
         {
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 3;
+            size_t t_degree = 1;
             size_t N = 128;
 
             // open the output file
@@ -2036,7 +2189,7 @@ tests_auto_1d()
 
     }
     /*********************  REFINEMENT IN TIME  **************************/
-    if(true)
+    if(false)
     {
         size_t nb_meshes = 4;
 
