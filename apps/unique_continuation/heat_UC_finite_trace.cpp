@@ -1384,7 +1384,8 @@ make_no_proj_stabilization(const Mesh& msh, const typename Mesh::cell_type& cl,
 // this has to be applied to basis functions at initial time (!)
 template<typename Mesh>
 Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic>
-make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl,
+make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl1,
+              const typename Mesh::cell_type& cl2,
         Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> mass_matrix,
         finite_trace_init<Mesh> finite_space,
         const hho_degree_info& di)
@@ -1393,31 +1394,42 @@ make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl,
     typedef Matrix<T, Dynamic, Dynamic> matrix_type;
 
     const auto celdeg = di.cell_degree();
-    const auto cb = make_scalar_monomial_basis(msh, cl, celdeg);
+    const auto cb1 = make_scalar_monomial_basis(msh, cl1, celdeg);
+    const auto cb2 = make_scalar_monomial_basis(msh, cl2, celdeg);
 
     size_t dim_finite_space = mass_matrix.rows();
     const auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
 
     // compute the L2-projection on the finite dim space
-    // F is the rhs of the projection
-    matrix_type F = matrix_type::Zero(dim_finite_space, cbs);
-    const auto qps = integrate(msh, cl, 2*celdeg);
-    for (auto& qp : qps)
+    // F1 is the rhs of the projection in cell 1
+    matrix_type F1 = matrix_type::Zero(dim_finite_space, cbs);
+    const auto qps1 = integrate(msh, cl1, 2*celdeg);
+    for (auto& qp : qps1)
     {
-        const auto c_phi = cb.eval_functions(qp.point());
+        const auto c_phi = cb1.eval_functions(qp.point());
         const auto fs_phi = finite_space.eval_functions(qp.point());
 
-        F += qp.weight() * fs_phi * c_phi.transpose();
+        F1 += qp.weight() * fs_phi * c_phi.transpose();
     }
 
-    // P is the coefficients vector of the proj in the finite space
-    matrix_type P = matrix_type::Zero(dim_finite_space, cbs);
+    matrix_type F2 = matrix_type::Zero(dim_finite_space, cbs);
+    const auto qps2 = integrate(msh, cl2, 2*celdeg);
+    for (auto& qp : qps2)
+    {
+        const auto c_phi = cb2.eval_functions(qp.point());
+        const auto fs_phi = finite_space.eval_functions(qp.point());
+
+        F2 += qp.weight() * fs_phi * c_phi.transpose();
+    }
+
+    // P1 is the coefficients vector of the proj 1 in the finite space
+    matrix_type P1 = matrix_type::Zero(dim_finite_space, cbs);
     LLT< Matrix<T, Dynamic, Dynamic> > mat_llt;
     mat_llt.compute(mass_matrix);
-    P = mat_llt.solve(F);
+    P1 = mat_llt.solve(F1);
 
     // compute the local cell mass matrix
-    auto mass_cell   = make_mass_matrix(msh, cl, cb);
+    auto mass_cell1   = make_mass_matrix(msh, cl1, cb1);
 
     // cout << "h = " << diameter(msh, cl) << endl;
     // cout << "F = " << F << std::endl;
@@ -1425,8 +1437,10 @@ make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl,
     // cout << "P.transpose()*F = " << P.transpose()*F << endl;
     // cout << "mass_cell = " << mass_cell << endl;
 
+    if( cl1 == cl2 )
+        return mass_cell1 - P1.transpose()*F2;
 
-    return mass_cell - P.transpose()*F;
+    return - P1.transpose()*F2;
     // return mass_cell;
 }
 
@@ -1964,19 +1978,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             }
 
             /* finite trace terms */
-            // initial finite trace
             // auto lhs2 = lhs;
-            if(step_i == 0 and true)
-            {
-                auto lhs2 = lhs;
-                auto mat_space_q0 = make_space_q0(msh, cl, mass_init, finite_trace_init, hdi);
-                for(size_t l1 = 0; l1 <= time_degree; l1++)
-                    for(size_t l2 = 0; l2 <= time_degree; l2++)
-                        lhs2.block(l1*cbs, l2*cbs, cbs, cbs) += mat_space_q0 * time_loc(l1,l2);
-
-                assembler.cross_assemble(msh, cl, cl, step_i, step_i, lhs2, rhs);
-                continue;
-            }
             // boundary finite trace (uses only cell unknowns)
             // auto q_bound = make_q_bound(msh, cl, time_mesh, t_cell, mass_bound, finite_trace_bound, time_mass, time_stiff, hdi);
             // cout << " q_bound = " << q_bound << endl << endl;
@@ -1994,6 +1996,30 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             assembler.add_time_coupling(msh, cl, step_i, coupling);
         }
 
+    }
+
+    /*** add the finite trace penalization terms ***/
+    // term q_0
+    for (auto& cl1 : msh)
+    {
+        for (auto& cl2 : msh)
+        {
+            auto fcs1    = faces(msh, cl1);
+            auto fcs2    = faces(msh, cl2);
+            assert(fcs1.size() == fcs2.size()); // assumption to ease the code
+            auto num_faces = fcs1.size();
+
+            size_t loc_size = 2 * (cbs + num_faces * fbs) * (time_degree + 1);
+            Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
+            Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
+            auto mat_space_q0 = make_space_q0(msh, cl1, cl2, mass_init, finite_trace_init, hdi);
+
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    lhs.block(l1*cbs, l2*cbs, cbs, cbs) += mat_space_q0 * time_loc(l1,l2);
+
+            assembler.cross_assemble(msh, cl1, cl2, 0, 0, lhs, rhs);
+        }
     }
     cout << "end assembly loop" << endl;
 
