@@ -799,6 +799,154 @@ class heat_UC_assembler
         }
     } // assemble()
 
+
+    /*
+     * cross_assemble : to assemble terms on distinct cells
+     */
+    void
+    cross_assemble(const Mesh&                     msh,
+                   const typename Mesh::cell_type& cl1,
+                   const typename Mesh::cell_type& cl2,
+                   const size_t                    n_step1,
+                   const size_t                    n_step2,
+                   const matrix_type&              lhs,
+                   const vector_type&              rhs)
+    {
+        auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
+                                if( !msh.is_boundary(fc) )
+                                    return false;
+                                auto bnd_id = msh.boundary_id(fc);
+                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
+                                    if(bnd_id == *it)
+                                        return false;
+                                return true;
+                            };
+
+        const auto fbs    = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
+        const auto cbs    = scalar_basis_size(di.cell_degree(), Mesh::dimension);
+        const auto fcs1    = faces(msh, cl1);
+        const auto fcs_id1 = faces_id(msh, cl1);
+        const auto fcs2    = faces(msh, cl2);
+        const auto fcs_id2 = faces_id(msh, cl2);
+        // const auto num_faces = fcs.size();
+
+        // we assume fcs1.size() == fcs2.size()
+        assert( fcs1.size() == fcs2.size() );
+
+        std::vector<assembly_index> asm_map1, asm_map2;
+        size_t loc_size = 2 * ( fcs1.size() * fbs + cbs ) * (time_degree + 1);
+        asm_map1.reserve(loc_size);
+        asm_map2.reserve(loc_size);
+
+        auto cell_offset1 = offset(msh, cl1);
+        auto cell_offset2 = offset(msh, cl2);
+
+        // first degrees of freedom are the cell components of the primal variable
+        for(size_t i = 0; i < cbs*(time_degree+1); i++)
+        {
+            asm_map1.push_back(assembly_index(cell_offset1 * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step1 + i, true));
+            asm_map2.push_back(assembly_index(cell_offset2 * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step2 + i, true));
+        }
+
+        // then face components of the primal variable
+        for (size_t face_i = 0; face_i < fcs1.size(); face_i++) // fcs1.size() == fcs2.size()
+        {
+            const auto face_offset1     = fcs_id1[face_i]; // offset(msh, fc);
+            const auto face_offset2     = fcs_id2[face_i]; // offset(msh, fc);
+            auto face_LHS_offset1 = num_cells * cbs * (time_degree+1) * time_steps;
+            auto face_LHS_offset2 = num_cells * cbs * (time_degree+1) * time_steps;
+            if(BC_known)
+            {
+                face_LHS_offset1 += compress_table.at(face_offset1) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step1; // compress table
+                face_LHS_offset2 += compress_table.at(face_offset2) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step2; // compress table
+            }
+            else
+            {
+                face_LHS_offset1 += face_offset1 * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step1; // no Dirichlet BC so no compress table
+                face_LHS_offset2 += face_offset2 * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step2; // no Dirichlet BC so no compress table
+            }
+
+            if(BC_known)
+            {
+                const auto fc1 = fcs1[face_i];
+                const auto fc2 = fcs2[face_i];
+                const bool dirichlet1 = is_dirichlet(fc1);
+                const bool dirichlet2 = is_dirichlet(fc2);
+
+                for (size_t i = 0; i < fbs*(time_degree+1); i++)
+                {
+                    asm_map1.push_back(assembly_index(face_LHS_offset1 + i, !dirichlet1));
+                    asm_map2.push_back(assembly_index(face_LHS_offset2 + i, !dirichlet2));
+                }
+            }
+            else
+            {
+                for (size_t i = 0; i < fbs*(time_degree+1); i++)
+                {
+                    asm_map1.push_back(assembly_index(face_LHS_offset1 + i, true)); // no test on Dirichlet (no BC)
+                    asm_map2.push_back(assembly_index(face_LHS_offset2 + i, true)); // no test on Dirichlet (no BC)
+                }
+            }
+        }
+
+        // then cell components of the dual variable
+        size_t num_sol_faces = num_all_faces;
+        if( BC_known ) num_sol_faces = num_other_faces;
+
+        size_t dual_offset = num_cells * cbs * (time_degree+1) * time_steps + num_sol_faces * fbs * (time_degree+1) * time_steps;
+        for(size_t i = 0; i < cbs*(time_degree+1); i++)
+        {
+            asm_map1.push_back(assembly_index(dual_offset + cell_offset1 * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step1 + i, true));
+            asm_map2.push_back(assembly_index(dual_offset + cell_offset2 * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step2 + i, true));
+        }
+
+        // then face components of the dual variable (with Dirichlet BC)
+        for (size_t face_i = 0; face_i < fcs1.size(); face_i++) // fcs1.size() == fcs2.size()
+        {
+            const auto fc1              = fcs1[face_i];
+            const auto fc2              = fcs2[face_i];
+            const auto face_offset1     = fcs_id1[face_i]; // offset(msh, fc);
+            const auto face_offset2     = fcs_id2[face_i]; // offset(msh, fc);
+            const auto face_LHS_offset1 = dual_offset + num_cells * cbs * (time_degree+1) * time_steps + compress_table.at(face_offset1) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step1;
+            const auto face_LHS_offset2 = dual_offset + num_cells * cbs * (time_degree+1) * time_steps + compress_table.at(face_offset2) * fbs * (time_degree+1) * time_steps + fbs * (time_degree+1) * n_step2;
+
+            const bool dirichlet1 = is_dirichlet(fc1);
+            const bool dirichlet2 = is_dirichlet(fc2);
+
+            for (size_t i = 0; i < fbs*(time_degree+1); i++)
+            {
+                asm_map1.push_back(assembly_index(face_LHS_offset1 + i, !dirichlet1));
+                asm_map2.push_back(assembly_index(face_LHS_offset2 + i, !dirichlet2));
+            }
+        }
+
+        // asm_map2 corresponds to rows
+        // asm_map1 corresponds to cols
+
+        for (size_t i = 0; i < lhs.rows(); i++)
+        {
+            if (!asm_map2[i].assemble())
+                continue;
+
+            for (size_t j = 0; j < lhs.cols(); j++)
+            {
+                if (asm_map1[j].assemble())
+                {
+                    triplets.push_back(Triplet<T>(asm_map2[i], asm_map1[j], lhs(i, j)));
+                    // triplets_MAT_RHS.push_back(Triplet<T>(asm_map[i], asm_map[j], mat_rhs(i, j)));
+                    // do we need this ??
+		}
+                // Dirichlet not taken into account
+                // else
+                //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
+            }
+
+            RHS(asm_map2[i]) += rhs(i);
+            // RHS_F(asm_map[i]) += rhs(i);
+            // do we need this ??
+        }
+    } // cross_assemble()
+
     /*
      * lhs must have the size of two time cells
      * n_step is between 1 and time_steps-1 (both included)
@@ -1826,7 +1974,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                     for(size_t l2 = 0; l2 <= time_degree; l2++)
                         lhs2.block(l1*cbs, l2*cbs, cbs, cbs) += mat_space_q0 * time_loc(l1,l2);
 
-                assembler.assemble(msh, cl, step_i, lhs2, rhs);
+                assembler.cross_assemble(msh, cl, cl, step_i, step_i, lhs2, rhs);
                 continue;
             }
             // boundary finite trace (uses only cell unknowns)
