@@ -935,19 +935,19 @@ class heat_UC_assembler
             }
         }
 
-        // asm_map2 corresponds to rows
-        // asm_map1 corresponds to cols
+        // asm_map1 corresponds to rows
+        // asm_map2 corresponds to cols
 
         for (size_t i = 0; i < lhs.rows(); i++)
         {
-            if (!asm_map2[i].assemble())
+            if (!asm_map1[i].assemble())
                 continue;
 
             for (size_t j = 0; j < lhs.cols(); j++)
             {
-                if (asm_map1[j].assemble())
+                if (asm_map2[j].assemble())
                 {
-                    triplets.push_back(Triplet<T>(asm_map2[i], asm_map1[j], lhs(i, j)));
+                    triplets.push_back(Triplet<T>(asm_map1[i], asm_map2[j], lhs(i, j)));
                     // triplets_MAT_RHS.push_back(Triplet<T>(asm_map[i], asm_map[j], mat_rhs(i, j)));
                     // do we need this ??
 		}
@@ -956,7 +956,7 @@ class heat_UC_assembler
                 //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
             }
 
-            RHS(asm_map2[i]) += rhs(i);
+            RHS(asm_map1[i]) += rhs(i);
             // RHS_F(asm_map[i]) += rhs(i);
             // do we need this ??
         }
