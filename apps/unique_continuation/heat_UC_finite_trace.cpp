@@ -1541,7 +1541,8 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
              finite_trace_bound<Mesh> finite_space,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_mass,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_stiffness,
-             const hho_degree_info& di)
+             const hho_degree_info& di, typename Mesh::coordinate_type dt,
+             typename Mesh::coordinate_type h_max)
 {
     using T = typename Mesh::coordinate_type;
     typedef Matrix<T, Dynamic, Dynamic> matrix_type;
@@ -1827,7 +1828,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
         }
     }
 
-    return L2_scal + der_t_scal + tang_scal;
+    return (1./h_max) * L2_scal + (dt/h_max) * der_t_scal + h_max * tang_scal;
 }
 
 ///////////////////////////////////////////////
@@ -2311,7 +2312,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
                     Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
                     Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
-                    auto q_bound = make_q_bound(msh, cl1, cl2, time_mesh, t_cell1, t_cell2, mass_bound, time_stiff_bound, tang_stiff_bound, finite_trace_bound, time_mass, time_stiff, hdi);
+                    auto q_bound = make_q_bound(msh, cl1, cl2, time_mesh, t_cell1, t_cell2, mass_bound, time_stiff_bound, tang_stiff_bound, finite_trace_bound, time_mass, time_stiff, hdi, dt, h_max);
 
                     lhs.block(0, 0, cbs*(time_degree+1), cbs*(time_degree+1)) = q_bound;
 
