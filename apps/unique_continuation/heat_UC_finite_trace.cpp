@@ -2173,6 +2173,84 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
                     -= jump_coeff * stiff * time_loc_cross(l1,l2);
 
+        /* coupling coming from the domain boundary terms : d_{\partial} */
+        for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
+        {
+            const auto fc = fcs[face_i];
+            if( !finite_trace_bound.is_dirichlet(msh, fc) )
+                continue;
+
+            /* coupling coming from the time jump penalization */
+            Matrix<scalar_type, Dynamic, Dynamic> trace_fc = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs,cbs);
+            const auto qps_f = integrate(msh, fc, 2*hdi.cell_degree());
+            for (auto& qpf : qps_f)
+            {
+                auto cf_phi = cb.eval_functions(qpf.point());
+
+                trace_fc += qpf.weight() * cf_phi * cf_phi.transpose();
+            }
+            T jump_coeff2 = 1./h_max;
+
+            // (v_T(t_{n-1}^+) , w_T(t_{n-1}^+))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(ts_c + l1*cbs, ts_c + l2*cbs, cbs, cbs)
+                        += jump_coeff2 * trace_fc * time_loc(l1,l2);
+
+            // (v_T(t_{n-1}^-) , w_T(t_{n-1}^-))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(l1*cbs, l2*cbs, cbs, cbs)
+                        += jump_coeff2 * trace_fc * time_loc_bis(l1,l2);
+
+            // - (v_T(t_{n-1}^-) , w_T(t_{n-1}^+))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(ts_c + l1*cbs, l2*cbs, cbs, cbs)
+                        -= jump_coeff2 * trace_fc * time_loc_cross(l2,l1);
+
+            // - (v_T(t_{n-1}^+) , w_T(t_{n-1}^-))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
+                        -= jump_coeff2 * trace_fc * time_loc_cross(l1,l2);
+
+            /* coupling coming from the gradient time jump penalization */
+            Matrix<scalar_type, Dynamic, Dynamic> stiff_fc = Matrix<scalar_type, Dynamic, Dynamic>::Zero(cbs,cbs);
+            for (auto& qpf : qps_f)
+            {
+                auto cf_dphi = cb.eval_gradients(qpf.point());
+
+                stiff_fc += qpf.weight() * cf_dphi * cf_dphi.transpose();
+            }
+            T jump_coeff3 = h_max;
+
+            // (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^+))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(ts_c + l1*cbs, ts_c + l2*cbs, cbs, cbs)
+                        += jump_coeff3 * stiff_fc * time_loc(l1,l2);
+
+            // (\GRAD v_T(t_{n-1}^-) , \GRAD w_T(t_{n-1}^-))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(l1*cbs, l2*cbs, cbs, cbs)
+                        += jump_coeff3 * stiff_fc * time_loc_bis(l1,l2);
+
+            // - (\GRAD v_T(t_{n-1}^-) , \GRAD w_T(t_{n-1}^+))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(ts_c + l1*cbs, l2*cbs, cbs, cbs)
+                        -= jump_coeff3 * stiff_fc * time_loc_cross(l2,l1);
+
+            // - (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^-))_{\partial Omega}
+            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                for(size_t l2 = 0; l2 <= time_degree; l2++)
+                    coupling.block(l1*cbs, ts_c + l2*cbs, cbs, cbs)
+                        -= jump_coeff3 * stiff_fc * time_loc_cross(l1,l2);
+
+        }
+
         // at this point all the coupling terms have been implemented
 
         /*** loop on the time steps ***/
