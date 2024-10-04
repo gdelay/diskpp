@@ -290,10 +290,25 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
 
         return ret;
     }
+
     bool is_dirichlet(const mesh_type& msh, const typename mesh_type::face_type& fc) {
         auto bar = barycenter(msh,fc);
         if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 )
             return true;
+        return false;
+    }
+
+    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::cell_type& cl) {
+
+        const auto fcs = faces(msh, cl);
+
+        for(size_t face_i = 0; face_i < fcs.size(); face_i++) // loop on faces
+        {
+            auto fc = fcs[face_i];
+            if( is_dirichlet(msh, fc) )
+                return true;
+        }
+
         return false;
     }
 
