@@ -1461,12 +1461,15 @@ make_space_q0(const Mesh& msh, const typename Mesh::cell_type& cl1,
 
 
 // compute the q_{\partial} term for penalization on the boundary
+// we assume that both cells cl1 and cl2 are on the domain boundary
 template<typename Mesh>
 Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic>
-make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl,
+make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
+             const typename Mesh::cell_type& cl2,
              const disk::generic_mesh<typename Mesh::coordinate_type, 1>& time_msh,
-             const typename disk::generic_mesh<typename Mesh::coordinate_type, 1>::cell_type& time_cell,
-             Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> mass_matrix,
+             const typename disk::generic_mesh<typename Mesh::coordinate_type, 1>::cell_type& time_cell1,
+             const typename disk::generic_mesh<typename Mesh::coordinate_type, 1>::cell_type& time_cell2,
+             Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> finite_mass_matrix,
              finite_trace_bound<Mesh> finite_space,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_mass,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_stiffness,
@@ -1475,89 +1478,103 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl,
     using T = typename Mesh::coordinate_type;
     typedef Matrix<T, Dynamic, Dynamic> matrix_type;
 
-    size_t dim_finite_space = mass_matrix.rows();
+    size_t dim_finite_space = finite_mass_matrix.rows();
     const auto celdeg = di.cell_degree();
     const auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
-    const auto cb = make_scalar_monomial_basis(msh, cl, celdeg);
+    const auto cb1 = make_scalar_monomial_basis(msh, cl1, celdeg);
+    const auto cb2 = make_scalar_monomial_basis(msh, cl2, celdeg);
     const size_t time_degree = time_mass.rows()-1;
 
-    const auto fcs = faces(msh, cl);
-    const auto num_faces = howmany_faces(msh, cl);
+    const auto fcs1 = faces(msh, cl1);
+    const auto fcs2 = faces(msh, cl2);
+    const auto num_faces = fcs1.size();
+    // we assume fcs1.size() == fcs2.size()
 
-    auto t_cb = make_scalar_monomial_basis(time_msh, time_cell, time_degree);
-
-    bool cl_on_boundary = false;
+    auto t_cb1 = make_scalar_monomial_basis(time_msh, time_cell1, time_degree);
+    auto t_cb2 = make_scalar_monomial_basis(time_msh, time_cell2, time_degree);
 
     // compute the L2-projection on the finite dim space
-    // F is the rhs of the projection
-    matrix_type F = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
+    // F1 is the rhs of the projection for cell 1
+    matrix_type F1 = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
 
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
-        auto fc = fcs[face_i];
-        if( !finite_space.is_dirichlet(msh, fc) or abs(barycenter(msh,fc).x()) < 1e-8 )  // ATTENTION : modif cette condition pour tests
+        auto fc1 = fcs1[face_i];
+        if( !finite_space.is_dirichlet(msh, fc1) )
             continue;
 
-        // cout << "on boundary : x = " << barycenter(msh, fc) << endl;
-
-        cl_on_boundary = true;
-
         // compute rhs proj contrib
-        const auto qps_f = integrate(msh, fc, 2*celdeg);
-        const auto qps_t = integrate(time_msh, time_cell, 2*time_degree);
+        const auto qps_f1 = integrate(msh, fc1, 2*celdeg);
+        const auto qps_t1 = integrate(time_msh, time_cell1, 2*time_degree);
 
-        for (auto& qpf : qps_f)
+        for (auto& qpf : qps_f1)
         {
-            const auto cf_phi = cb.eval_functions(qpf.point());
-            for (auto& qpt : qps_t)
+            const auto cf_phi = cb1.eval_functions(qpf.point());
+            for (auto& qpt : qps_t1)
             {
-                const auto ct_phi = t_cb.eval_functions(qpt.point());
+                const auto ct_phi = t_cb1.eval_functions(qpt.point());
                 const auto fs_phi = finite_space.eval_functions(qpt.point().x(), qpf.point());
 
                 for(size_t l1 = 0; l1 <= time_degree; l1++)
-                    F.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_phi[l1] * fs_phi * cf_phi.transpose();
+                    F1.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_phi[l1] * fs_phi * cf_phi.transpose();
             }
         }
     }
 
-    if( !cl_on_boundary )
-        return matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
+    // F2 is the rhs of the projection for cell 2
+    matrix_type F2 = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
 
-    // P is the coefficients vector of the proj in the finite space
-    matrix_type P = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
+    for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
+    {
+        auto fc2 = fcs2[face_i];
+        if( !finite_space.is_dirichlet(msh, fc2) )
+            continue;
+
+        // compute rhs proj contrib
+        const auto qps_f2 = integrate(msh, fc2, 2*celdeg);
+        const auto qps_t2 = integrate(time_msh, time_cell2, 2*time_degree);
+
+        for (auto& qpf : qps_f2)
+        {
+            const auto cf_phi = cb2.eval_functions(qpf.point());
+            for (auto& qpt : qps_t2)
+            {
+                const auto ct_phi = t_cb2.eval_functions(qpt.point());
+                const auto fs_phi = finite_space.eval_functions(qpt.point().x(), qpf.point());
+
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                    F2.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_phi[l1] * fs_phi * cf_phi.transpose();
+            }
+        }
+    }
+
+    // P1 is the coefficients vector of the proj for cell 1 in the finite space
+    matrix_type P1 = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
     LLT< Matrix<T, Dynamic, Dynamic> > mat_llt;
-    mat_llt.compute(mass_matrix);
-    P = mat_llt.solve(F);
+    mat_llt.compute(finite_mass_matrix);
+    P1 = mat_llt.solve(F1);
 
-    cout << "barycenter(msh,cl) = " << barycenter(msh,cl) << endl;
-    cout << "barycenter(time_msh,time_cell) = " << barycenter(time_msh,time_cell) << endl;
-    cout << "diameter(time_msh, time_cell) = " << diameter(time_msh, time_cell) << endl;
-    cout << "F = " << F << endl;
-    cout << "P = " << P << endl;
-
-    matrix_type ret = matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
-
-
+    if( !(cl1 == cl2 and time_cell1 == time_cell2) )
+        return - P1.transpose()*F2;
     
     matrix_type trace_f = matrix_type::Zero(cbs,cbs);
 
-    for(size_t face_i = 0; face_i < num_faces; face_i++)
+    for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
-        auto fc = fcs[face_i];
+        auto fc = fcs1[face_i];
         if( !finite_space.is_dirichlet(msh, fc) )
             continue;
 
         const auto qps_f = integrate(msh, fc, 2*celdeg);
         for (auto& qpf : qps_f)
         {
-            auto cf_phi = cb.eval_functions(qpf.point());
+            auto cf_phi = cb1.eval_functions(qpf.point());
 
             trace_f += qpf.weight() * cf_phi * cf_phi.transpose();
-            // cout << "cf_phi = " << cf_phi << endl;
         }
     }
 
-    // cout << " trace_f = " << trace_f << endl;
+    matrix_type ret = matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
 
     for(size_t l1 = 0; l1 <= time_degree; l1++)
     {
@@ -1566,15 +1583,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl,
             ret.block(l1*cbs,l2*cbs,cbs,cbs) += time_mass(l1,l2) * trace_f;
         }
     }
-    cout << "time_mass = " << time_mass << endl << endl;
-    cout << "trace_f_time = " << ret << endl << endl;
-    cout << "PF = " << P.transpose()*F << endl << endl;
-    cout << "ret = " << ret - P.transpose()*F << endl << endl;
-
-    // Verifier les calculs de F et P dans des cas simples
-
-    // return matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
-    return ret - P.transpose()*F;
+    return ret - P1.transpose()*F2;
 }
 
 ///////////////////////////////////////////////
@@ -1921,7 +1930,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         // at this point all the coupling terms have been implemented
 
         /*** loop on the time steps ***/
-        for(int step_i = 0; step_i < time_steps; step_i++) {
+        for(size_t step_i = 0; step_i < time_steps; step_i++) {
             Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
 
             auto t_cell = *(time_mesh.cells_begin()+step_i);
@@ -2036,6 +2045,37 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             assembler.cross_assemble(msh, cl1, cl2, 0, 0, lhs, rhs);
         }
     }
+    // term q_{\partial}
+    for (auto& cl1 : msh)
+    {
+        if( !finite_trace_bound.is_dirichlet(msh, cl1) ) // boundary faces only
+            continue;
+        auto fcs1    = faces(msh, cl1);
+        size_t loc_size = 2 * (cbs + fcs1.size() * fbs) * (time_degree + 1);
+
+        for (auto& cl2 : msh)
+        {
+            if( !finite_trace_bound.is_dirichlet(msh, cl2) ) // boundary faces only
+                continue;
+
+            for(size_t step_i = 0; step_i < time_steps; step_i++) {
+                auto t_cell1 = *(time_mesh.cells_begin()+step_i);
+
+                for(size_t step_j = 0; step_j < time_steps; step_j++) {
+                    auto t_cell2 = *(time_mesh.cells_begin()+step_j);
+
+                    Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
+                    Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
+                    auto q_bound = make_q_bound(msh, cl1, cl2, time_mesh, t_cell1, t_cell2, mass_bound, finite_trace_bound, time_mass, time_stiff, hdi);
+
+                    lhs.block(0, 0, cbs*(time_degree+1), cbs*(time_degree+1)) = q_bound;
+
+                    assembler.cross_assemble(msh, cl1, cl2, step_i, step_j, lhs, rhs);
+                }
+            }
+        }
+    }
+
     cout << "end assembly loop" << endl;
 
     // close the noise file
