@@ -292,11 +292,25 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
     }
 
     function_type
-    eval_time_der_functions(const T t, const point_type& pt) const
+    eval_time_ders(const T t, const point_type& pt) const
     {
         function_type ret = function_type::Zero(basis_size);
 
         // write the basis functions derivatives here
+        for (size_t k = 0; k < basis_size; k++)
+        {
+            ret(k) = 0.;
+        }
+
+        return ret;
+    }
+
+    matrix_type
+    eval_gradients(const T t, const point_type& pt) const
+    {
+        matrix_type ret = matrix_type::Zero(basis_size, 1); // one dim
+
+        // write the basis functions gradients here
         for (size_t k = 0; k < basis_size; k++)
         {
             ret(k) = 0.;
@@ -390,7 +404,7 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
                     {
                         for (auto& qpf : qps_f)
                         {
-                            const auto dt_phi = eval_time_der_functions(qpt.point().x(), qpf.point());
+                            const auto dt_phi = eval_time_ders(qpt.point().x(), qpf.point());
                             stiff_mat += qpt.weight() * qpf.weight() * dt_phi * dt_phi.transpose();
                         }
                     }
@@ -399,6 +413,15 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
         }
 
         return stiff_mat;
+    }
+
+    // compute the space-tangential-stiffness matrix associated to this basis
+    matrix_type
+    make_tang_stiffness_matrix(const mesh_type& msh, const disk::generic_mesh<T, 1>& time_msh) const
+    {
+        // this matrix is null in one dimension
+        // (tangential component only)
+        return matrix_type::Zero(basis_size,basis_size);
     }
 };
 
@@ -1514,6 +1537,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
              const typename disk::generic_mesh<typename Mesh::coordinate_type, 1>::cell_type& time_cell2,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> finite_mass_matrix,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> finite_t_stiff_matrix,
+             Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> finite_tang_stiff_matrix,
              finite_trace_bound<Mesh> finite_space,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_mass,
              Matrix<typename Mesh::coordinate_type, Dynamic, Dynamic> time_stiffness,
@@ -1635,7 +1659,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
             for (auto& qpt : qps_t1)
             {
                 const auto ct_dphi = t_cb1.eval_gradients(qpt.point());
-                const auto fs_dphi = finite_space.eval_time_der_functions(qpt.point().x(), qpf.point());
+                const auto fs_dphi = finite_space.eval_time_ders(qpt.point().x(), qpf.point());
 
                 for(size_t l1 = 0; l1 <= time_degree; l1++)
                     der_t_proj1.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_dphi[l1] * fs_dphi * cf_phi.transpose();
@@ -1661,7 +1685,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
             for (auto& qpt : qps_t2)
             {
                 const auto ct_dphi = t_cb2.eval_gradients(qpt.point());
-                const auto fs_dphi = finite_space.eval_time_der_functions(qpt.point().x(), qpf.point());
+                const auto fs_dphi = finite_space.eval_time_ders(qpt.point().x(), qpf.point());
 
                 for(size_t l1 = 0; l1 <= time_degree; l1++)
                     der_t_proj2.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_dphi[l1] * fs_dphi * cf_phi.transpose();
@@ -1677,9 +1701,94 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
 
     // (\partial_t v , \partial_t w) : encoded at the end for efficiency reasons
 
+
+    /*** tang_scal : (\nabla_\partial v , \nabla_\partial w)
+         - (\nabla_\partial P_{\partial} v , \nabla_\partial w)
+         - (\nabla_\partial v , \nabla_\partial P_{\partial} w)
+         + (\nabla_\partial P_{\partial} v , \nabla_\partial P_{\partial} w) ***/
+    matrix_type tang_scal = matrix_type::Zero(cbs*(time_degree+1), cbs*(time_degree+1));
+
+    // + (\nabla_\partial P_{\partial} v , \nabla_\partial P_{\partial} w)
+    tang_scal += P1.transpose() * finite_tang_stiff_matrix * P2;
+
+    // (\nabla_\partial \beta_i , \nabla_\partial \phi1_j)
+    matrix_type tang_proj1 = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
+
+    for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
+    {
+        auto fc1 = fcs1[face_i];
+        if( !finite_space.is_dirichlet(msh, fc1) )
+            continue;
+
+        // compute rhs proj contrib
+        const auto qps_f1 = integrate(msh, fc1, 2*celdeg);
+
+        const auto n1  = normal(msh, cl1, fc1);
+
+        for (auto& qpf : qps_f1)
+        {
+            const auto cf_dphi = cb1.eval_gradients(qpf.point());
+            const auto cf_dphi_n = cf_dphi * n1;
+            for (auto& qpt : qps_t1)
+            {
+                const auto ct_phi = t_cb1.eval_functions(qpt.point());
+                const auto fs_dphi = finite_space.eval_gradients(qpt.point().x(), qpf.point());
+                const auto fs_dphi_n = fs_dphi * n1;
+
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                {
+                    tang_proj1.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_phi[l1] * fs_dphi * cf_dphi.transpose(); // full gradient
+                    tang_proj1.block(0, l1*cbs, dim_finite_space, cbs) -= qpt.weight() * qpf.weight() * ct_phi[l1] * fs_dphi_n * cf_dphi_n.transpose(); // remove normal component
+                }
+            }
+        }
+    }
+
+    // (\nabla_\partial \beta_i , \nabla_\partial \phi2_j)
+    matrix_type tang_proj2 = matrix_type::Zero(dim_finite_space, cbs*(time_degree+1));
+
+    for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
+    {
+        auto fc2 = fcs2[face_i];
+        if( !finite_space.is_dirichlet(msh, fc2) )
+            continue;
+
+        // compute rhs proj contrib
+        const auto qps_f2 = integrate(msh, fc2, 2*celdeg);
+
+        const auto n2  = normal(msh, cl2, fc2);
+
+        for (auto& qpf : qps_f2)
+        {
+            const auto cf_dphi = cb2.eval_gradients(qpf.point());
+            const auto cf_dphi_n = cf_dphi * n2;
+            for (auto& qpt : qps_t2)
+            {
+                const auto ct_phi = t_cb2.eval_functions(qpt.point());
+                const auto fs_dphi = finite_space.eval_gradients(qpt.point().x(), qpf.point());
+                const auto fs_dphi_n = fs_dphi * n2;
+
+                for(size_t l1 = 0; l1 <= time_degree; l1++)
+                {
+                    tang_proj2.block(0, l1*cbs, dim_finite_space, cbs) += qpt.weight() * qpf.weight() * ct_phi[l1] * fs_dphi * cf_dphi.transpose(); // full gradient
+                    tang_proj2.block(0, l1*cbs, dim_finite_space, cbs) -= qpt.weight() * qpf.weight() * ct_phi[l1] * fs_dphi_n * cf_dphi_n.transpose(); // remove normal component
+                }
+            }
+        }
+    }
+
+    // - (\nabla_\partial P_\partial v , \nabla_\partial w)
+    tang_scal -= P1.transpose() * tang_proj2;
+
+    // - (\nabla_\partial v , \nabla_\partial P_\partial w)
+    tang_scal -= tang_proj1.transpose() * P2;
+
+    // (\nabla_\partial v , \nabla_\partial w) : encoded at the end for efficiency reasons
+
     if( cl1 == cl2 and time_cell1 == time_cell2 )
     {
         matrix_type trace_f = matrix_type::Zero(cbs,cbs);
+        matrix_type tang_f = matrix_type::Zero(cbs,cbs); // tangential stiffness
 
         for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
         {
@@ -1687,12 +1796,18 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
             if( !finite_space.is_dirichlet(msh, fc) )
                 continue;
 
+            const auto n  = normal(msh, cl1, fc);
+
             const auto qps_f = integrate(msh, fc, 2*celdeg);
             for (auto& qpf : qps_f)
             {
                 auto cf_phi = cb1.eval_functions(qpf.point());
+                auto cf_dphi = cb1.eval_gradients(qpf.point());
+                auto cf_dphi_n = cf_dphi * n;
 
                 trace_f += qpf.weight() * cf_phi * cf_phi.transpose();
+                tang_f += qpf.weight() * cf_dphi * cf_dphi.transpose(); // full gradients
+                tang_f -= qpf.weight() * cf_dphi_n * cf_dphi_n.transpose(); // remove normal contributions
             }
         }
 
@@ -1705,11 +1820,14 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
 
                 // + (\partial_t v , \partial_t w)
                 der_t_scal.block(l1*cbs,l2*cbs,cbs,cbs) += time_stiffness(l1,l2) * trace_f;
+
+                // + (\nabla_\partial v , \nabla_\partial w)
+                tang_scal.block(l1*cbs,l2*cbs,cbs,cbs) += time_mass(l1,l2) * tang_f;
             }
         }
     }
 
-    return L2_scal + der_t_scal;
+    return L2_scal + der_t_scal + tang_scal;
 }
 
 ///////////////////////////////////////////////
@@ -1752,6 +1870,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto finite_trace_bound = make_finite_trace_bound(msh, 1);
     auto mass_bound = finite_trace_bound.make_mass_matrix(msh, time_mesh);
     auto time_stiff_bound = finite_trace_bound.make_time_stiffness_matrix(msh, time_mesh);
+    auto tang_stiff_bound = finite_trace_bound.make_tang_stiffness_matrix(msh, time_mesh);
 
     auto rhs_fun = make_rhs_function(msh);
     auto sol_fun = make_solution_function(msh);
@@ -2192,7 +2311,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
                     Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
                     Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
-                    auto q_bound = make_q_bound(msh, cl1, cl2, time_mesh, t_cell1, t_cell2, mass_bound, time_stiff_bound, finite_trace_bound, time_mass, time_stiff, hdi);
+                    auto q_bound = make_q_bound(msh, cl1, cl2, time_mesh, t_cell1, t_cell2, mass_bound, time_stiff_bound, tang_stiff_bound, finite_trace_bound, time_mass, time_stiff, hdi);
 
                     lhs.block(0, 0, cbs*(time_degree+1), cbs*(time_degree+1)) = q_bound;
 
