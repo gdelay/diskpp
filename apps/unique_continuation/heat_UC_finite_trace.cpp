@@ -1940,8 +1940,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     for(int l = 0; l< time_degree; l++) dtl *= dt;
     for(int k=0; k < hdi.cell_degree(); k++) hk *= h_max;
 
-    T Tikhonov_coeff = hk + dtl * sqrt(dt);
-    // Tikhonov_coeff *= h_max; // a enlever -> tests
+    // T Tikhonov_coeff = hk + dtl * sqrt(dt);
+    T Tikhonov_coeff = 0.;
 
     tc.tic();
 
