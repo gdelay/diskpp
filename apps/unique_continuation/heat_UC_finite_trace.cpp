@@ -221,8 +221,8 @@ struct finite_trace_init< Mesh<T, 1, Storage> >
         for (size_t k = 0; k < basis_size; k++)
         {
             // ret(k) = std::sqrt(2) * std::sin((k+1)*M_PI*pt.x());
-            // ret(k) = std::sqrt(2) * std::cos((k+1)*M_PI*pt.x());
-            ret(k) = 1.;
+            ret(k) = std::sqrt(2) * std::cos((k+1)*M_PI*pt.x());
+            // ret(k) = 1.;
         }
 
         return ret;
@@ -282,10 +282,10 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
         // choose the basis functions here
         for (size_t k = 0; k < basis_size; k++)
         {
-            // ret(k) = std::cos(0.5*(k+1)*M_PI*t) * std::cos(0.5*(k+1)*M_PI*pt.x());
+            ret(k) = std::cos(0.5*(k+1)*M_PI*t) * std::cos(0.5*(k+1)*M_PI*pt.x());
             // ret(k) = pt.x();
             // ret(k) = std::sqrt(0.5) * std::cos(0.5*(k+1)*M_PI*t);
-            ret(k) = 1.;
+            // ret(k) = 1.;
         }
 
         return ret;
@@ -299,7 +299,9 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
         // write the basis functions derivatives here
         for (size_t k = 0; k < basis_size; k++)
         {
-            ret(k) = 0.;
+            T freq = 0.5*(k+1)*M_PI;
+            ret(k) = -freq*std::sin(freq*t) * std::cos(freq*pt.x());
+            // ret(k) = 0.;
         }
 
         return ret;
@@ -313,6 +315,8 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
         // write the basis functions gradients here
         for (size_t k = 0; k < basis_size; k++)
         {
+            T freq = 0.5*(k+1)*M_PI;
+            ret(k) = -freq*std::cos(freq*t) * std::sin(freq*pt.x());
             ret(k) = 0.;
         }
 
@@ -445,11 +449,11 @@ struct rhs_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return 0.0;
+        // return 0.0;
         // return M_PI*M_PI*std::sin( M_PI * pt.x() );
         // return ( M_PI*M_PI*std::sin(M_PI * t) + M_PI * std::cos(M_PI * t) ) * std::sin( M_PI * pt.x() );
         // return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
-        // return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::cos( M_PI * pt.x() );
+        return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::cos( M_PI * pt.x() );
         // return 0.;
     }
 };
@@ -494,9 +498,9 @@ struct solution_functor< Mesh<T, 1, Storage> >
     {
         // return std::sin( M_PI * pt.x() ) * std::sin(M_PI * t);
         // return std::sin( M_PI * pt.x() ) * std::cos(M_PI * t);
-        // return std::cos( M_PI * pt.x() ) * std::cos(M_PI * t);
+        return std::cos( M_PI * pt.x() ) * std::cos(M_PI * t);
         // return pt.x();
-        return 1.0;
+        // return 1.0;
     }
 };
 
@@ -1868,7 +1872,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     // finite trace elements
     auto finite_trace_init = make_finite_trace_init(msh, 1);
     auto mass_init = finite_trace_init.make_mass_matrix(msh);
-    auto finite_trace_bound = make_finite_trace_bound(msh, 1);
+    auto finite_trace_bound = make_finite_trace_bound(msh, 2);
     auto mass_bound = finite_trace_bound.make_mass_matrix(msh, time_mesh);
     auto time_stiff_bound = finite_trace_bound.make_time_stiffness_matrix(msh, time_mesh);
     auto tang_stiff_bound = finite_trace_bound.make_tang_stiffness_matrix(msh, time_mesh);
@@ -2702,8 +2706,8 @@ tests_auto_1d()
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 1;
-            size_t N = 128;
+            size_t t_degree = 2;
+            size_t N = 64;
 
             // open the output file
             std::ofstream file;
