@@ -920,7 +920,6 @@ class heat_UC_assembler
         const auto fcs_id1 = faces_id(msh, cl1);
         const auto fcs2    = faces(msh, cl2);
         const auto fcs_id2 = faces_id(msh, cl2);
-        // const auto num_faces = fcs.size();
 
         // we assume fcs1.size() == fcs2.size()
         assert( fcs1.size() == fcs2.size() );
@@ -1025,17 +1024,10 @@ class heat_UC_assembler
                 if (asm_map2[j].assemble())
                 {
                     triplets.push_back(Triplet<T>(asm_map1[i], asm_map2[j], lhs(i, j)));
-                    // triplets_MAT_RHS.push_back(Triplet<T>(asm_map[i], asm_map[j], mat_rhs(i, j)));
-                    // do we need this ??
 		}
-                // Dirichlet not taken into account
-                // else
-                //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
             }
 
             RHS(asm_map1[i]) += rhs(i);
-            // RHS_F(asm_map[i]) += rhs(i);
-            // do we need this ??
         }
     } // cross_assemble()
 
