@@ -269,9 +269,9 @@ struct rhs_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return 0.0;
+        // return 0.0;
         // return M_PI*M_PI*std::sin( M_PI * pt.x() );
-        // return ( M_PI*M_PI*std::cos(M_PI * t) - M_PI * std::sin(M_PI * t) ) * std::sin( M_PI * pt.x() );
+        return 3*M_PI*M_PI*std::cos(M_PI * t) * std::sin( 2 * M_PI * pt.x() );
     }
 };
 
@@ -327,7 +327,7 @@ struct solution_functor< Mesh<T, 1, Storage> >
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        return std::sin( M_PI * pt.x() ) * std::cos(M_PI * t);
+        return std::sin( 2 * M_PI * pt.x() ) * std::cos(M_PI * t);
     }
 };
 
