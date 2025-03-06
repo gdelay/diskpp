@@ -34,7 +34,7 @@
 #include "loaders/loader.hpp"
 #include "methods/hho"
 #include "solvers/solver.hpp"
-#include "output/silo.hpp"
+// #include "output/silo.hpp"
 #include "timecounter.h"
 #include "colormanip.h"
 #include "bases/bases.hpp"
@@ -1421,145 +1421,145 @@ make_condensed_wave_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, si
 
 //////////////////////////////////////////////////////
 
-template<template<typename, size_t, typename> class Mesh,
-         typename T, typename Storage>
-void
-export_to_silo(const Mesh<T, 1, Storage>& msh,
-               const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
-               const Matrix<T, Dynamic, 1>& B, int cycle = -1)
-{
-    std::stringstream ss_data, ss_varpi, ss_B;
-    ss_varpi << "varpi.txt";
-    ss_B << "B.txt";
-    if(cycle == -1)
-    {
-        ss_data << "sol.txt";
-    }
-    else
-    {
-        ss_data << "out_data_" << cycle << ".txt";
-    }
+// template<template<typename, size_t, typename> class Mesh,
+//          typename T, typename Storage>
+// void
+// export_to_silo(const Mesh<T, 1, Storage>& msh,
+//                const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
+//                const Matrix<T, Dynamic, 1>& B, int cycle = -1)
+// {
+//     std::stringstream ss_data, ss_varpi, ss_B;
+//     ss_varpi << "varpi.txt";
+//     ss_B << "B.txt";
+//     if(cycle == -1)
+//     {
+//         ss_data << "sol.txt";
+//     }
+//     else
+//     {
+//         ss_data << "out_data_" << cycle << ".txt";
+//     }
 
 
-    std::ofstream data_file(ss_data.str(), std::ios::out | std::ios::trunc);
-    if(!data_file)
-        std::cerr << "error opening file !!" << std::endl;
+//     std::ofstream data_file(ss_data.str(), std::ios::out | std::ios::trunc);
+//     if(!data_file)
+//         std::cerr << "error opening file !!" << std::endl;
 
-    std::ofstream varpi_file(ss_varpi.str(), std::ios::out | std::ios::trunc);
-    if(!varpi_file)
-        std::cerr << "error opening file !!" << std::endl;
+//     std::ofstream varpi_file(ss_varpi.str(), std::ios::out | std::ios::trunc);
+//     if(!varpi_file)
+//         std::cerr << "error opening file !!" << std::endl;
 
-    std::ofstream B_file(ss_B.str(), std::ios::out | std::ios::trunc);
-    if(!B_file)
-        std::cerr << "error opening file !!" << std::endl;
-
-
-    int cell_i = 0;
-    for(auto& cl : msh)
-    {
-        auto x = barycenter(msh, cl).x();
-
-        data_file << x << "  " << data[cell_i] << std::endl;
-        varpi_file << x << "  " << varpi[cell_i] << std::endl;
-        B_file << x << "  " << B[cell_i] << std::endl;
-        cell_i++;
-    }
-
-    data_file.close();
-    varpi_file.close();
-    B_file.close();
+//     std::ofstream B_file(ss_B.str(), std::ios::out | std::ios::trunc);
+//     if(!B_file)
+//         std::cerr << "error opening file !!" << std::endl;
 
 
+//     int cell_i = 0;
+//     for(auto& cl : msh)
+//     {
+//         auto x = barycenter(msh, cl).x();
 
-    //// For tests with the exact sol (modif N)
-    std::stringstream ss_ex_sol;
-    if(cycle == -1)
-    {
-        ss_ex_sol << "ex_sol.txt";
-    }
-    else
-    {
-        ss_ex_sol << "ex_sol_" << cycle << ".txt";
-    }
+//         data_file << x << "  " << data[cell_i] << std::endl;
+//         varpi_file << x << "  " << varpi[cell_i] << std::endl;
+//         B_file << x << "  " << B[cell_i] << std::endl;
+//         cell_i++;
+//     }
+
+//     data_file.close();
+//     varpi_file.close();
+//     B_file.close();
 
 
-    std::ofstream ex_sol_file(ss_ex_sol.str(), std::ios::out | std::ios::trunc);
-    if(!ex_sol_file)
-        std::cerr << "error opening file !!" << std::endl;
 
-    auto sol_fun = make_solution_function(msh);
+//     //// For tests with the exact sol (modif N)
+//     std::stringstream ss_ex_sol;
+//     if(cycle == -1)
+//     {
+//         ss_ex_sol << "ex_sol.txt";
+//     }
+//     else
+//     {
+//         ss_ex_sol << "ex_sol_" << cycle << ".txt";
+//     }
 
-    int N = 32;
-    double t = (2./N) * (cycle+0.5);
 
-    cell_i = 0;
-    for(auto& cl : msh) {
-        auto x = barycenter(msh, cl).x();
-        auto sol = sol_fun(t , barycenter(msh, cl));
+//     std::ofstream ex_sol_file(ss_ex_sol.str(), std::ios::out | std::ios::trunc);
+//     if(!ex_sol_file)
+//         std::cerr << "error opening file !!" << std::endl;
 
-        ex_sol_file << x << "  " << sol << std::endl;
-        cell_i++;
-    }
+//     auto sol_fun = make_solution_function(msh);
 
-    ex_sol_file.close();
-}
+//     int N = 32;
+//     double t = (2./N) * (cycle+0.5);
+
+//     cell_i = 0;
+//     for(auto& cl : msh) {
+//         auto x = barycenter(msh, cl).x();
+//         auto sol = sol_fun(t , barycenter(msh, cl));
+
+//         ex_sol_file << x << "  " << sol << std::endl;
+//         cell_i++;
+//     }
+
+//     ex_sol_file.close();
+// }
 
 /////////////////////////
 
-template<template<typename, size_t, typename> class Mesh,
-         typename T, typename Storage>
-void
-export_to_silo(const Mesh<T, 2, Storage>& msh,
-               const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
-               const Matrix<T, Dynamic, 1>& B, int cycle = -1)
-{
-    disk::silo_database silo;
+// template<template<typename, size_t, typename> class Mesh,
+//          typename T, typename Storage>
+// void
+// export_to_silo(const Mesh<T, 2, Storage>& msh,
+//                const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
+//                const Matrix<T, Dynamic, 1>& B, int cycle = -1)
+// {
+//     disk::silo_database silo;
 
-    if (cycle == -1)
-        silo.create("UC_wave.silo");
-    else
-    {
-        std::stringstream ss;
-        ss << "out_" << cycle << ".silo";
-        silo.create(ss.str());
-    }
+//     if (cycle == -1)
+//         silo.create("UC_wave.silo");
+//     else
+//     {
+//         std::stringstream ss;
+//         ss << "out_" << cycle << ".silo";
+//         silo.create(ss.str());
+//     }
 
-    silo.add_mesh(msh, "mesh");
+//     silo.add_mesh(msh, "mesh");
 
-    silo.add_variable("mesh", "sol", data, disk::zonal_variable_t );
-    silo.add_variable("mesh", "varpi", varpi, disk::zonal_variable_t );
-    silo.add_variable("mesh", "B", B, disk::zonal_variable_t );
-    silo.close();
-}
+//     silo.add_variable("mesh", "sol", data, disk::zonal_variable_t );
+//     silo.add_variable("mesh", "varpi", varpi, disk::zonal_variable_t );
+//     silo.add_variable("mesh", "B", B, disk::zonal_variable_t );
+//     silo.close();
+// }
 
 /////////////////////////
 // dim = 3 (same as for dim = 2)
 
-template<template<typename, size_t, typename> class Mesh,
-         typename T, typename Storage>
-void
-export_to_silo(const Mesh<T, 3, Storage>& msh,
-               const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
-               const Matrix<T, Dynamic, 1>& B, int cycle = -1)
-{
-    disk::silo_database silo;
+// template<template<typename, size_t, typename> class Mesh,
+//          typename T, typename Storage>
+// void
+// export_to_silo(const Mesh<T, 3, Storage>& msh,
+//                const Matrix<T, Dynamic, 1>& data, const Matrix<T, Dynamic, 1>& varpi,
+//                const Matrix<T, Dynamic, 1>& B, int cycle = -1)
+// {
+//     disk::silo_database silo;
 
-    if (cycle == -1)
-        silo.create("UC_wave.silo");
-    else
-    {
-        std::stringstream ss;
-        ss << "out_" << cycle << ".silo";
-        silo.create(ss.str());
-    }
+//     if (cycle == -1)
+//         silo.create("UC_wave.silo");
+//     else
+//     {
+//         std::stringstream ss;
+//         ss << "out_" << cycle << ".silo";
+//         silo.create(ss.str());
+//     }
 
-    silo.add_mesh(msh, "mesh");
+//     silo.add_mesh(msh, "mesh");
 
-    silo.add_variable("mesh", "sol", data, disk::zonal_variable_t );
-    silo.add_variable("mesh", "varpi", varpi, disk::zonal_variable_t );
-    silo.add_variable("mesh", "B", B, disk::zonal_variable_t );
-    silo.close();
-}
+//     silo.add_variable("mesh", "sol", data, disk::zonal_variable_t );
+//     silo.add_variable("mesh", "varpi", varpi, disk::zonal_variable_t );
+//     silo.add_variable("mesh", "B", B, disk::zonal_variable_t );
+//     silo.close();
+// }
 
 ///////////////////////////////////////
 
@@ -2191,7 +2191,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         if(step_i % freq_exp == 0)
             std::cout << "Step " << step_i << std::endl;
 
-        Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
+        // Matrix<scalar_type, Dynamic, 1> sol_silo = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
         Matrix<scalar_type, Dynamic, 1> data_varpi = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
         Matrix<scalar_type, Dynamic, 1> data_B = Matrix<scalar_type, Dynamic, 1>::Zero(msh.cells_size());
 
@@ -2199,8 +2199,8 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         {
             // be careful : this exports a very approximated solution
             // does not work if static condensation is employed
-            for (size_t i = 0; i < msh.cells_size(); i++)
-                sol_silo(i) = u(i*cbs*(time_degree+1)*time_steps + cbs*(time_degree+1) * step_i);
+            // for (size_t i = 0; i < msh.cells_size(); i++)
+            //     sol_silo(i) = u(i*cbs*(time_degree+1)*time_steps + cbs*(time_degree+1) * step_i);
 
             int cell_i = 0;
             for(auto& cl : msh)
@@ -2210,7 +2210,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                 data_B(cell_i) = B_fun( bar );
                 cell_i++;
             }
-            export_to_silo( msh, sol_silo, data_varpi, data_B, step_i );
+            // export_to_silo( msh, sol_silo, data_varpi, data_B, step_i );
         }
 
         auto t_cell = *(time_mesh.cells_begin()+step_i);
