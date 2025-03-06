@@ -2418,7 +2418,7 @@ UC_wave_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     TI.H1_Om = std::sqrt(L2H1_error);
     TI.L2_Om = std::sqrt(L2L2_error);
     TI.Energy_Om = std::sqrt(L2H1_error + H1L2_error);
-    TI.shifted_En_Om = std::sqrt(LinfL2_error);
+    TI.shifted_En_Om = std::sqrt(LinfL2_error + L2H1_error + H1L2_error);
     TI.shifted_En_B = std::sqrt(LinfL2_error_B);
     TI.shifted_En_other = std::sqrt(LinfL2_error_other);
     TI.H1_B = std::sqrt(L2H1_B_error);
