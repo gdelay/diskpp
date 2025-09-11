@@ -1824,7 +1824,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
         }
     }
 
-    return (1./h_max) * L2_scal + (dt/h_max) * der_t_scal + h_max * tang_scal;
+    return (1./h_max) * L2_scal + (dt*dt/h_max) * der_t_scal + h_max * tang_scal;
 }
 
 ///////////////////////////////////////////////
@@ -1972,7 +1972,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
         /* Primal - Primal */
         Matrix<T, Dynamic, Dynamic> PP = stab;
-        PP.block(0,0,cbs,cbs) += gamma * Tikhonov_coeff * Tikhonov_coeff * mass.block(0,0,cbs,cbs);
+        // PP.block(0,0,cbs,cbs) += gamma * Tikhonov_coeff * Tikhonov_coeff * mass.block(0,0,cbs,cbs);
         // add data assimilation term
         if( varpi_fun(barycenter(msh,cl)) > 0.5 )
         {
@@ -2092,8 +2092,6 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
                             -= sigma.block(cbs + face_i*fbs, cbs + face_j*fbs, fbs, fbs) * time_mass(l1,l2);
 
 
-        // at this point all the lhs terms have been implemented
-
         /*** Matrix coupling for the terms coupling two time steps ***/
         size_t coupling_size = 4 * cbs * (time_degree+1); // we consider the cell dof on two time steps
         Matrix<scalar_type, Dynamic, Dynamic> coupling = Matrix<scalar_type, Dynamic, Dynamic>::Zero(coupling_size, coupling_size);
@@ -2185,7 +2183,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
                 trace_fc += qpf.weight() * cf_phi * cf_phi.transpose();
             }
-            T jump_coeff2 = 1./h_max;
+            T jump_coeff2 = 1.; // 1./h_max;
 
             // (v_T(t_{n-1}^+) , w_T(t_{n-1}^+))_{\partial Omega}
             for(size_t l1 = 0; l1 <= time_degree; l1++)
@@ -2219,7 +2217,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
                 stiff_fc += qpf.weight() * cf_dphi * cf_dphi.transpose();
             }
-            T jump_coeff3 = h_max;
+            T jump_coeff3 = 0.; //h_max;
 
             // (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^+))_{\partial Omega}
             for(size_t l1 = 0; l1 <= time_degree; l1++)
@@ -2260,7 +2258,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
             // T noise_size = 0.;
             // T noise_size = 0.001;
-            T noise_size = 1.e-5;
+            // T noise_size = 1.e-5;
 
             // heat equation RHS
             for(auto& qpt : qpst) // time integration
