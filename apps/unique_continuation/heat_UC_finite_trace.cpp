@@ -250,6 +250,59 @@ struct finite_trace_init< Mesh<T, 1, Storage> >
     }
 };
 
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct finite_trace_init< Mesh<T, 2, Storage> >
+{
+    typedef Mesh<T,2,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    typedef Matrix<scalar_type, Dynamic, 1> function_type;
+    typedef Matrix<scalar_type, Dynamic, Dynamic>  matrix_type;
+
+    size_t basis_size;
+
+    // constructor
+    finite_trace_init(size_t basis_size) : basis_size(basis_size) {}
+
+    function_type
+    eval_functions(const point_type& pt) const
+    {
+        function_type ret = function_type::Zero(basis_size);
+
+        // choose the basis functions here
+        for (size_t k = 0; k < basis_size; k++)
+        {
+            // ret(k) = std::sqrt(2) * std::sin((k+1)*M_PI*pt.x());
+            ret(k) = std::sqrt(2) * std::cos((k+1)*M_PI*pt.x()) * std::cos((k+1)*M_PI*pt.y());
+            // ret(k) = 1.;
+        }
+
+        return ret;
+    }
+
+    // compute the mass matrix associated to this basis
+    matrix_type
+    make_mass_matrix(const mesh_type& msh) const
+    {
+        // in some particular cases, the matrix is identity
+        // return matrix_type::Identity(basis_size, basis_size);
+
+        matrix_type mass_mat = matrix_type::Zero(basis_size,basis_size);
+        for(auto& cl : msh) {
+            // compute local mass matrices
+            const auto qps = integrate(msh, cl, 4); // 4 is the integration degree here
+            for (auto& qp : qps)
+            {
+                const auto phi = eval_functions(qp.point());
+                mass_mat += qp.weight() * phi * phi.transpose();
+            }
+        }
+
+        return mass_mat;
+    }
+};
+
+
 template<typename Mesh>
 auto make_finite_trace_init(const Mesh& msh, size_t nb_basis)
 {
@@ -403,7 +456,7 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
                 for(auto& t_cl : time_msh)
                 {
                     const auto qps_t = integrate(time_msh, t_cl, 4); // 4 is the integration degree here
-                    // compute the local contribution to the mass matrix
+                    // compute the local contribution to the time-stiffness matrix
                     for (auto& qpt : qps_t)
                     {
                         for (auto& qpf : qps_f)
@@ -425,6 +478,206 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
     {
         // this matrix is null in one dimension
         // (tangential component only)
+        return matrix_type::Zero(basis_size,basis_size);
+    }
+};
+
+template<template<typename, size_t, typename> class Mesh, typename T, typename Storage>
+struct finite_trace_bound< Mesh<T, 2, Storage> >
+{
+    typedef Mesh<T,2,Storage>               mesh_type;
+    typedef typename mesh_type::coordinate_type scalar_type;
+    typedef typename mesh_type::point_type  point_type;
+    typedef Matrix<scalar_type, Dynamic, 1> function_type;
+    typedef Matrix<scalar_type, Dynamic, Dynamic>  matrix_type;
+
+    size_t basis_size;
+
+    // constructor
+    finite_trace_bound(size_t basis_size) : basis_size(basis_size) {}
+
+    function_type
+    eval_functions(const T t, const point_type& pt) const
+    {
+        function_type ret = function_type::Zero(basis_size);
+
+        // choose the basis functions here
+        for (size_t k = 0; k < basis_size; k++)
+        {
+            ret(k) = std::cos(0.5*(k+1)*M_PI*t) * std::cos(0.5*(k+1)*M_PI*pt.x()) * std::cos(0.5*(k+1)*M_PI*pt.y());
+            // ret(k) = pt.x();
+            // ret(k) = std::sqrt(0.5) * std::cos(0.5*(k+1)*M_PI*t);
+            // ret(k) = 1.;
+        }
+
+        return ret;
+    }
+
+    function_type
+    eval_time_ders(const T t, const point_type& pt) const
+    {
+        function_type ret = function_type::Zero(basis_size);
+
+        // write the basis functions derivatives here
+        for (size_t k = 0; k < basis_size; k++)
+        {
+            T freq = 0.5*(k+1)*M_PI;
+            ret(k) = -freq*std::sin(freq*t) * std::cos(freq*pt.x()) * std::cos(freq*pt.y());
+            // ret(k) = 0.;
+        }
+
+        return ret;
+    }
+
+    matrix_type
+    eval_gradients(const T t, const point_type& pt) const
+    {
+        matrix_type ret = matrix_type::Zero(basis_size, 2); // 2 dim
+
+        // write the basis functions gradients here
+        for (size_t k = 0; k < basis_size; k++)
+        {
+            T freq = 0.5*(k+1)*M_PI;
+            ret(k,0) = -freq*std::cos(freq*t) * std::sin(freq*pt.x()) * std::cos(freq*pt.y());
+            ret(k,1) = -freq*std::cos(freq*t) * std::cos(freq*pt.x()) * std::sin(freq*pt.y());
+        }
+
+        return ret;
+    }
+
+    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::face_type& fc) {
+        auto bar = barycenter(msh,fc);
+        if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 or std::abs(bar.y() - 1) < 1e-6 or std::abs(bar.y()) < 1e-6)
+            return true;
+        return false;
+    }
+
+    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::cell_type& cl) {
+
+        const auto fcs = faces(msh, cl);
+
+        for(size_t face_i = 0; face_i < fcs.size(); face_i++) // loop on faces
+        {
+            auto fc = fcs[face_i];
+            if( is_dirichlet(msh, fc) )
+                return true;
+        }
+
+        return false;
+    }
+
+    // compute the mass matrix associated to this basis
+    matrix_type
+    make_mass_matrix(const mesh_type& msh, const disk::generic_mesh<T, 1>& time_msh) const
+    {
+        matrix_type mass_mat = matrix_type::Zero(basis_size,basis_size);
+
+        for(auto& cl : msh) {
+            // in some particular cases, the matrix is identity
+            // return matrix_type::Identity(basis_size, basis_size);
+
+            const auto fcs    = faces(msh, cl);
+            for (size_t face_i = 0; face_i < fcs.size(); face_i++)
+            {
+                const auto fc = fcs[face_i];
+                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                    continue;
+
+                const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
+
+                // compute the local contributions to the mass matrix
+                for(auto& t_cl : time_msh)
+                {
+                    const auto qps_t = integrate(time_msh, t_cl, 4); // 4 is the integration degree here
+                    // compute the local contribution to the mass matrix
+                    for (auto& qpt : qps_t)
+                    {
+                        for (auto& qpf : qps_f)
+                        {
+                            const auto phi = eval_functions(qpt.point().x(), qpf.point());
+                            mass_mat += qpt.weight() * qpf.weight() * phi * phi.transpose();
+                        }
+                    }
+                }
+            }
+        }
+
+        return mass_mat;
+    }
+
+    // compute the time-stiffness matrix associated to this basis
+    matrix_type
+    make_time_stiffness_matrix(const mesh_type& msh, const disk::generic_mesh<T, 1>& time_msh) const
+    {
+        matrix_type stiff_mat = matrix_type::Zero(basis_size,basis_size);
+
+        for(auto& cl : msh) {
+            const auto fcs    = faces(msh, cl);
+            for (size_t face_i = 0; face_i < fcs.size(); face_i++)
+            {
+                const auto fc = fcs[face_i];
+                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                    continue;
+
+                const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
+
+                // compute the local contributions to the time-stiffness matrix
+                for(auto& t_cl : time_msh)
+                {
+                    const auto qps_t = integrate(time_msh, t_cl, 4); // 4 is the integration degree here
+                    // compute the local contribution to the time-stiffness matrix
+                    for (auto& qpt : qps_t)
+                    {
+                        for (auto& qpf : qps_f)
+                        {
+                            const auto dt_phi = eval_time_ders(qpt.point().x(), qpf.point());
+                            stiff_mat += qpt.weight() * qpf.weight() * dt_phi * dt_phi.transpose();
+                        }
+                    }
+                }
+            }
+        }
+
+        return stiff_mat;
+    }
+
+    // compute the space-tangential-stiffness matrix associated to this basis
+    matrix_type
+    make_tang_stiffness_matrix(const mesh_type& msh, const disk::generic_mesh<T, 1>& time_msh) const
+    {
+        // compute this matrix
+        matrix_type tang_mat = matrix_type::Zero(basis_size,basis_size);
+
+        for(auto& cl : msh) {
+            const auto fcs    = faces(msh, cl);
+            for (size_t face_i = 0; face_i < fcs.size(); face_i++)
+            {
+                const auto fc = fcs[face_i];
+                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                    continue;
+
+                const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
+
+                const auto n  = normal(msh, cl, fc); // normal vector
+
+                // compute the local contributions to the tangential-stiffness matrix
+                for(auto& t_cl : time_msh)
+                {
+                    const auto qps_t = integrate(time_msh, t_cl, 4); // 4 is the integration degree here
+                    // compute the local contribution to the tangential-stiffness matrix
+                    for (auto& qpt : qps_t)
+                    {
+                        for (auto& qpf : qps_f)
+                        {
+                            const auto fs_dphi = eval_gradients(qpt.point().x(), qpf.point());
+                            const auto fs_dphi_n = fs_dphi * n;
+                            tang_mat += qpt.weight() * qpf.weight() * fs_dphi * fs_dphi.transpose(); // full stiffness matrix
+                            tang_mat -= qpt.weight() * qpf.weight() * fs_dphi_n * fs_dphi_n.transpose(); // remove normal components
+                        }
+                    }
+                }
+            }
+        }
         return matrix_type::Zero(basis_size,basis_size);
     }
 };
@@ -468,8 +721,9 @@ struct rhs_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(const T t, const point_type& pt) const
     {
-        return ( 2*M_PI*M_PI*std::cos(M_PI*t) - M_PI*std::sin(M_PI*t) ) * std::sin( M_PI * pt.x() )
-            * std::sin( M_PI * pt.y() );
+        // return ( 2*M_PI*M_PI*std::cos(M_PI*t) - M_PI*std::sin(M_PI*t) ) * std::sin( M_PI * pt.x() )
+        //    * std::sin( M_PI * pt.y() );
+        return (2*M_PI*M_PI*std::cos(M_PI*t) - M_PI*std::sin(M_PI*t) ) * std::cos(M_PI*pt.x()) * std::cos(M_PI*pt.y());
     }
 };
 
@@ -517,7 +771,8 @@ struct solution_functor< Mesh<T, 2, Storage> >
 
     scalar_type operator()(T t, const point_type& pt) const
     {
-        return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+        // return std::cos(M_PI*t) * std::sin(M_PI*pt.x()) * std::sin(M_PI*pt.y());
+        return std::cos(M_PI*t) * std::cos(M_PI*pt.x()) * std::cos(M_PI*pt.y());
     }
 };
 
@@ -2807,13 +3062,13 @@ tests_auto_2d()
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
     // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
 
-    meshes.push_back("gmsh_meshes/test2d_target_1.geo");
-    meshes.push_back("gmsh_meshes/test2d_target_1_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_target_2.geo");
-    meshes.push_back("gmsh_meshes/test2d_target_2_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_target_3.geo");
-    meshes.push_back("gmsh_meshes/test2d_target_3_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_target_4.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_1.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_1_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_2.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_2_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_3.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_3_5.geo");
+    meshes.push_back("gmsh_meshes/test2d_3bound_4.geo");
 
     // T noise_size = 1.e-3;
     // T noise_size = 1.e-5;
@@ -2894,7 +3149,7 @@ tests_auto_2d()
         files.push_back("./test_time_k3.txt");
 
         // we test time degree 0 and 1 only
-        for(int t_degree=0; t_degree < 2; t_degree++)
+        for(int t_degree=0; t_degree < 3; t_degree++)
         {
             std::cout << blue << " WORKING WITH l = " << t_degree << std::endl;
             std::cout << nocolor;
@@ -2945,8 +3200,8 @@ tests_auto_2d()
 */
 int main(int argc, char **argv)
 {
-    tests_auto_1d<double>();
-    // tests_auto_2d<double>();
+    // tests_auto_1d<double>();
+    tests_auto_2d<double>();
     return 0;
 }
 
