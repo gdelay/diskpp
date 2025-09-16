@@ -662,6 +662,7 @@ public:
     T L2_B; // L2-error in B
     T H1_z; // H1-error for the dual variable
     size_t nb_dof; // number of degrees of freedom
+    T h_max; // maximal cell diameter
 };
 
 // B function for the time domain
@@ -2629,6 +2630,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     TI.H1_B = std::sqrt(L2H1_B_error);
     TI.L2_B = std::sqrt(L2L2_B_error);
     TI.H1_z = std::sqrt(L2H1_z);
+    TI.h_max = h_max;
 
 
     /** export solution with gnuplot for 1d meshes **/
@@ -2693,13 +2695,13 @@ tests_auto_1d()
         files.push_back("./test_space_k3.txt");
 
         // we test space degrees from 1 to 3
-        for(int s_degree=1; s_degree < 2; s_degree++)
+        for(int s_degree=1; s_degree <= 3; s_degree++)
         {
             std::cout << blue << " WORKING WITH k = " << s_degree << std::endl;
             std::cout << nocolor;
 
-            size_t t_degree = 2;
-            size_t N = 64;
+            size_t t_degree = 3;
+            size_t N = 128;
 
             // open the output file
             std::ofstream file;
@@ -2723,12 +2725,10 @@ tests_auto_1d()
                 // test this mesh
                 auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
-                auto diam = average_diameter(msh);
-
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
-                     << "\t" << TI.nb_dof << "\t" << diam
+                     << "\t" << TI.nb_dof << "\t" << TI.h_max
                      << std::endl;
             }
 
@@ -2738,7 +2738,7 @@ tests_auto_1d()
 
     }
     /*********************  REFINEMENT IN TIME  **************************/
-    if(false)
+    if(true)
     {
         size_t nb_meshes = 4;
 
@@ -2869,12 +2869,10 @@ tests_auto_2d()
                 // test this mesh
                 auto TI = UC_heat_solver(msh, s_degree, N, t_degree, noise_fct);
 
-                auto diam = average_diameter(msh);
-
                 // write the results in the file
                 file << i+1 << "\t" << TI.L2_B << "\t" << TI.H1_B << "\t"
                      << TI.L2_Om << "\t" << TI.H1_Om << "\t" << TI.H1_z
-                     << "\t" << TI.nb_dof << "\t" << diam
+                     << "\t" << TI.nb_dof << "\t" << TI.h_max
                      << std::endl;
             }
 
