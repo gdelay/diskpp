@@ -3057,18 +3057,18 @@ tests_auto_2d()
 
     // list of mesh files
     std::vector<std::string> meshes;
-    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
-    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
-    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
-    // meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
+    meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
+    meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
+    meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
+    meshes.push_back("./../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
 
-    meshes.push_back("gmsh_meshes/test2d_3bound_1.geo");
-    meshes.push_back("gmsh_meshes/test2d_3bound_1_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_3bound_2.geo");
-    meshes.push_back("gmsh_meshes/test2d_3bound_2_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_3bound_3.geo");
-    meshes.push_back("gmsh_meshes/test2d_3bound_3_5.geo");
-    meshes.push_back("gmsh_meshes/test2d_3bound_4.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_1.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_1_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_2.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_2_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_3.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_3_5.geo");
+    // meshes.push_back("gmsh_meshes/test2d_3bound_4.geo");
 
     // T noise_size = 1.e-3;
     // T noise_size = 1.e-5;
@@ -3114,8 +3114,8 @@ tests_auto_2d()
             {
                 mesh_type msh;
 
-                // disk::netgen_mesh_loader<T, 2> loader;
-                disk::gmsh_geometry_loader< mesh_type > loader;
+                disk::netgen_mesh_loader<T, 2> loader;
+                // disk::gmsh_geometry_loader< mesh_type > loader;
 
                 if( !loader.read_mesh(meshes.at(i)) )
                     std::cout << "error loading mesh !" << std::endl;
@@ -3171,8 +3171,8 @@ tests_auto_2d()
                 mesh_type msh;
                 size_t N = time_meshes[i];
 
-                // disk::netgen_mesh_loader<T, 2> loader;
-                disk::gmsh_geometry_loader< mesh_type > loader;
+                disk::netgen_mesh_loader<T, 2> loader;
+                // disk::gmsh_geometry_loader< mesh_type > loader;
 
 
                 if( !loader.read_mesh(meshes.at(5)) )
