@@ -678,7 +678,7 @@ struct finite_trace_bound< Mesh<T, 2, Storage> >
                 }
             }
         }
-        return matrix_type::Zero(basis_size,basis_size);
+        return tang_mat;
     }
 };
 
