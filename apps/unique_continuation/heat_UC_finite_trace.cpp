@@ -1117,12 +1117,6 @@ class heat_UC_assembler
                 asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
         }
 
-        // no initial data for the moment !!
-	// compute initial datum contribution to RHS
-        // vector_type u0 = vector_type::Zero(loc_size);
-        // u0.block(0,0,cbs,1) = project_function(msh, cl, di.cell_degree(), init_fun, di.cell_degree());
-        // auto rhs_modif = mat_rhs * u0 + rhs;
-
         for (size_t i = 0; i < lhs.rows(); i++)
         {
             if (!asm_map[i].assemble())
@@ -2101,6 +2095,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
 
     const bool EXPORT_NOISE = false;
+    const bool known_init_datum = true;
 
     auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
     auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
@@ -2127,6 +2122,9 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
     auto rhs_fun = make_rhs_function(msh);
     auto sol_fun = make_solution_function(msh);
+    auto init_fun = [sol_fun](const point_type& pt) -> scalar_type {
+			return sol_fun(0., pt);
+		    };
 
     auto varpi_fun = make_varpi_function(msh);
     auto B_fun = make_B_function(msh);
@@ -2595,11 +2593,39 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         }
 
     }
+    /*** add penalization for the initial condition (if relevent) ***/
+    for (auto& cl : msh)
+    {
+        if(!known_init_datum) break; // this term is not relevent if we do not know the initial datum
+
+        auto fcs    = faces(msh, cl);
+        auto num_faces = fcs.size();
+
+        size_t loc_size = 2*(time_degree+1)*(cbs+num_faces*fbs);
+
+
+        // LHS
+        Matrix<scalar_type, Dynamic, Dynamic> lhs = Matrix<scalar_type, Dynamic, Dynamic>::Zero(loc_size, loc_size);
+        auto cb     = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
+        auto mass   = make_mass_matrix(msh, cl, cb);
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            for(size_t l2 = 0; l2 <= time_degree; l2++)
+                lhs.block(l1*cbs, l2*cbs, cbs, cbs) += mass.block(0, 0, cbs, cbs) * time_loc(l1,l2);
+
+        // RHS
+        Matrix<scalar_type, Dynamic, 1> rhs = Matrix<scalar_type, Dynamic, 1>::Zero(lhs.cols());
+        auto space_init_rhs = make_rhs(msh, cl, cb, init_fun, 1);
+        for(size_t l1 = 0; l1 <= time_degree; l1++)
+            rhs.block(l1*cbs, 0, cbs, 1) += space_init_rhs * time_loc(l1,0);
+
+        assembler.assemble(msh, cl, 0, lhs, rhs); // step = 0
+    }
 
     /*** add the finite trace penalization terms ***/
     // term q_0
     for (auto& cl1 : msh)
     {
+        if(known_init_datum) break; // this term is not needed if we known the initial datum
         for (auto& cl2 : msh)
         {
             auto fcs1    = faces(msh, cl1);
@@ -3200,8 +3226,8 @@ tests_auto_2d()
 */
 int main(int argc, char **argv)
 {
-    // tests_auto_1d<double>();
-    tests_auto_2d<double>();
+    tests_auto_1d<double>();
+    // tests_auto_2d<double>();
     return 0;
 }
 
