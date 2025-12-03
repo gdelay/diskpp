@@ -2437,7 +2437,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
                 trace_fc += qpf.weight() * cf_phi * cf_phi.transpose();
             }
-            T jump_coeff2 = 1.; // 1./h_max;
+            T jump_coeff2 = 1./h_max; // = 1.;
 
             // (v_T(t_{n-1}^+) , w_T(t_{n-1}^+))_{\partial Omega}
             for(size_t l1 = 0; l1 <= time_degree; l1++)
@@ -2471,7 +2471,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
 
                 stiff_fc += qpf.weight() * cf_dphi * cf_dphi.transpose();
             }
-            T jump_coeff3 = 0.; //h_max;
+            T jump_coeff3 = h_max; // = 0.;
 
             // (\GRAD v_T(t_{n-1}^+) , \GRAD w_T(t_{n-1}^+))_{\partial Omega}
             for(size_t l1 = 0; l1 <= time_degree; l1++)
