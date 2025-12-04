@@ -567,7 +567,7 @@ struct finite_trace_bound< Mesh<T, 2, Storage> >
         // return false;
 
         auto bar = barycenter(msh,fc);
-        if( std::abs(bar.x()) < 1e-6 or (bar.y > 0.75) or (bar.y < 0.25) )
+        if( std::abs(bar.x()) < 1e-6 or (bar.y() > 0.75) or (bar.y() < 0.25) )
             return true;
         return false;
     }
