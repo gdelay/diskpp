@@ -7,7 +7,7 @@
  *  /_\/_\/_\/_\   methods.
  *
  * This file is copyright of the following authors:
- * Guillaume Delay  (C) 2024          guillaume.delay@sorbonne-universite.fr
+ * Guillaume Delay  (C) 2024-2026       guillaume.delay@sorbonne-universite.fr
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -376,21 +376,31 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
         return ret;
     }
 
-    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::face_type& fc) {
+    bool is_bnd(const mesh_type& msh, const typename mesh_type::face_type& fc) { // is boundary
         auto bar = barycenter(msh,fc);
         if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 )
             return true;
         return false;
     }
 
-    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::cell_type& cl) {
+    bool is_known_BC(const mesh_type& msh, const typename mesh_type::face_type& fc) {
+        // set return false to remove this option
+        // return false;
+
+        auto bar = barycenter(msh,fc);
+        if( std::abs(bar.x()) < 1e-6 )
+            return true;
+        return false;
+    }
+
+    bool is_finite_bound(const mesh_type& msh, const typename mesh_type::cell_type& cl) {
 
         const auto fcs = faces(msh, cl);
 
         for(size_t face_i = 0; face_i < fcs.size(); face_i++) // loop on faces
         {
             auto fc = fcs[face_i];
-            if( is_dirichlet(msh, fc) )
+            if( is_bnd(msh, fc) and !is_known_BC(msh,fc) )
                 return true;
         }
 
@@ -411,7 +421,7 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
             for (size_t face_i = 0; face_i < fcs.size(); face_i++)
             {
                 const auto fc = fcs[face_i];
-                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                if(!this->is_bnd(msh, fc) or is_known_BC(msh, fc)) // loop on the dirichlet faces of the finite_bound area
                     continue;
 
                 const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
@@ -447,7 +457,7 @@ struct finite_trace_bound< Mesh<T, 1, Storage> >
             for (size_t face_i = 0; face_i < fcs.size(); face_i++)
             {
                 const auto fc = fcs[face_i];
-                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                if(!this->is_bnd(msh, fc) or is_known_BC(msh, fc)) // loop on the dirichlet faces of the finite_bound area
                     continue;
 
                 const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
@@ -545,21 +555,31 @@ struct finite_trace_bound< Mesh<T, 2, Storage> >
         return ret;
     }
 
-    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::face_type& fc) {
+    bool is_bnd(const mesh_type& msh, const typename mesh_type::face_type& fc) { // is_boundary
         auto bar = barycenter(msh,fc);
         if(std::abs(bar.x() - 1) < 1e-6 or std::abs(bar.x()) < 1e-6 or std::abs(bar.y() - 1) < 1e-6 or std::abs(bar.y()) < 1e-6)
             return true;
         return false;
     }
 
-    bool is_dirichlet(const mesh_type& msh, const typename mesh_type::cell_type& cl) {
+    bool is_known_BC(const mesh_type& msh, const typename mesh_type::face_type& fc) {
+        // set return false to remove this option
+        // return false;
+
+        auto bar = barycenter(msh,fc);
+        if( std::abs(bar.x()) < 1e-6 or (bar.y > 0.75) or (bar.y < 0.25) )
+            return true;
+        return false;
+    }
+
+    bool is_finite_bound(const mesh_type& msh, const typename mesh_type::cell_type& cl) {
 
         const auto fcs = faces(msh, cl);
 
         for(size_t face_i = 0; face_i < fcs.size(); face_i++) // loop on faces
         {
             auto fc = fcs[face_i];
-            if( is_dirichlet(msh, fc) )
+            if( is_bnd(msh, fc) and !is_known_BC(msh,fc) )
                 return true;
         }
 
@@ -580,7 +600,7 @@ struct finite_trace_bound< Mesh<T, 2, Storage> >
             for (size_t face_i = 0; face_i < fcs.size(); face_i++)
             {
                 const auto fc = fcs[face_i];
-                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                if(!this->is_bnd(msh, fc) or is_known_BC(msh, fc)) // loop on the dirichlet faces of the finite_bound area
                     continue;
 
                 const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
@@ -616,7 +636,7 @@ struct finite_trace_bound< Mesh<T, 2, Storage> >
             for (size_t face_i = 0; face_i < fcs.size(); face_i++)
             {
                 const auto fc = fcs[face_i];
-                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                if(!this->is_bnd(msh, fc) or is_known_BC(msh, fc)) // loop on the dirichlet faces of the finite_bound area
                     continue;
 
                 const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
@@ -653,7 +673,7 @@ struct finite_trace_bound< Mesh<T, 2, Storage> >
             for (size_t face_i = 0; face_i < fcs.size(); face_i++)
             {
                 const auto fc = fcs[face_i];
-                if(!this->is_dirichlet(msh, fc)) // loop on the dirichlet faces
+                if(!this->is_bnd(msh, fc) or is_known_BC(msh, fc)) // loop on the dirichlet faces of the finite_bound area
                     continue;
 
                 const auto qps_f = integrate(msh, fc, 4); // 4 is the integration degree here
@@ -942,8 +962,9 @@ class heat_UC_assembler
     std::vector<size_t>     expand_table;
     hho_degree_info         di;
     size_t                  time_degree;
-    std::vector<Triplet<T>> triplets; //, triplets_MAT_RHS;
+    std::vector<Triplet<T>> triplets;
     bool                    BC_known;
+    finite_trace_bound<Mesh> finite_space_bound;
 
     size_t num_all_faces, num_dirichlet_faces, num_other_faces, num_cells, system_size, time_steps;
 
@@ -977,9 +998,6 @@ class heat_UC_assembler
         }
     };
 
-    // list of boundaries that are not actual boundaries (has to be updated according to the considred mesh)
-    const vector<int> not_bnd;
-
   public:
     typedef dynamic_matrix<T> matrix_type;
     typedef dynamic_vector<T> vector_type;
@@ -988,18 +1006,14 @@ class heat_UC_assembler
     vector_type     RHS;
 
     // BC_known : true if we know the Dirichlet values of the solution, false otherwise
-    heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, bool BC_known=false)
-	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(BC_known), not_bnd({6,7,8,9,10,11})
+    heat_UC_assembler(const Mesh& msh, hho_degree_info hdi, size_t t_degree, size_t t_steps, finite_trace_bound<Mesh> finite_space_bound)
+	: di(hdi), time_degree(t_degree), time_steps(t_steps), BC_known(true), finite_space_bound(finite_space_bound)
     {
         auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
+                                if( !finite_space_bound.is_bnd(msh, fc) or !finite_space_bound.is_known_BC(msh, fc))
                                     return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
                                 return true;
-                                    };
+                            };
 
         num_all_faces       = msh.faces_size();
         num_dirichlet_faces = std::count_if(msh.faces_begin(), msh.faces_end(), is_dirichlet);
@@ -1035,23 +1049,20 @@ class heat_UC_assembler
         // RHS_F = vector_type::Zero(system_size);
     }
 
-    // here the Dirichlet data are not taken into account
-    // the rhs function is not time-dependent
-
+    template<typename Function>
     void
     assemble(const Mesh&                     msh,
              const typename Mesh::cell_type& cl,
+             const disk::generic_mesh<typename Mesh::coordinate_type, 1>& time_mesh,
              const size_t                    n_step,
              const matrix_type&              lhs,
-             const vector_type&              rhs)
+             const vector_type&              rhs,
+             const Function&                 dirichlet_bf,
+             Matrix<T, Dynamic, Dynamic> time_mass)
     {
         auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
+                                if( !finite_space_bound.is_bnd(msh, fc) or !finite_space_bound.is_known_BC(msh, fc))
                                     return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
                                 return true;
                             };
 
@@ -1059,11 +1070,11 @@ class heat_UC_assembler
         const auto cbs    = scalar_basis_size(di.cell_degree(), Mesh::dimension);
         const auto fcs    = faces(msh, cl);
         const auto fcs_id = faces_id(msh, cl);
-        // const auto num_faces = fcs.size();
 
         std::vector<assembly_index> asm_map;
         size_t loc_size = 2 * ( fcs.size() * fbs + cbs ) * (time_degree + 1);
         asm_map.reserve(loc_size);
+        Matrix<T, Dynamic, 1> dirichlet_data = Matrix<T, Dynamic, 1>::Zero( loc_size );
 
         auto cell_offset = offset(msh, cl);
         // first degrees of freedom are the cell components of the primal variable
@@ -1087,6 +1098,41 @@ class heat_UC_assembler
 
                 for (size_t i = 0; i < fbs*(time_degree+1); i++)
                     asm_map.push_back(assembly_index(face_LHS_offset + i, !dirichlet));
+
+                // compute dirichlet_data
+                if(dirichlet)
+                {
+                    // compute local space-time mass matrix
+                    auto fb = make_scalar_monomial_basis(msh, fc, di.face_degree());
+                    matrix_type mass_fc = make_mass_matrix(msh, fc, fb);
+                    matrix_type mass_tot = matrix_type::Zero(fbs*(time_degree+1), fbs*(time_degree+1));
+                    for(size_t l1 = 0; l1 <= time_degree; l1++)
+                        for(size_t l2 = 0; l2 <= time_degree; l2++)
+                            mass_tot.block(l1*fbs, l2*fbs, fbs, fbs) += time_mass(l1,l2) * mass_fc;
+
+                    // compute RHS for projection
+                    vector_type proj_rhs = vector_type::Zero( fbs*(time_degree+1) );
+
+                    auto t_cell = *(time_mesh.cells_begin()+n_step);
+                    auto t_cb = make_scalar_monomial_basis(time_mesh, t_cell, time_degree);
+                    const auto qpst = integrate(time_mesh, t_cell , 2*time_degree);
+                    const auto qps_fb = integrate(msh, fc, 2*di.face_degree());
+                    for(auto& qpt : qpst)
+                    {
+                        auto t_phi   = t_cb.eval_functions( qpt.point() );
+                        T time_point = qpt.point().x();
+                        for(auto& qp : qps_fb) // space integration
+                        {
+                            auto f_phi = fb.eval_functions( qp.point() );
+                            for(size_t l1 = 0; l1 <= time_degree; l1++)
+                                proj_rhs.block(l1*fbs, 0, fbs, 1) += qp.weight() * qpt.weight() * t_phi[l1] * dirichlet_bf(time_point, qp.point()) * f_phi;
+                        }
+                    }
+
+                    // compute projection
+                    size_t loc_offset = cbs*(time_degree+1) + face_i * fbs * (time_degree+1);
+                    dirichlet_data.block(loc_offset, 0, fbs*(time_degree+1), 1) = mass_tot.ldlt().solve(proj_rhs);
+                }
             }
             else
             {
@@ -1125,19 +1171,12 @@ class heat_UC_assembler
             for (size_t j = 0; j < lhs.cols(); j++)
             {
                 if (asm_map[j].assemble())
-                {
                     triplets.push_back(Triplet<T>(asm_map[i], asm_map[j], lhs(i, j)));
-                    // triplets_MAT_RHS.push_back(Triplet<T>(asm_map[i], asm_map[j], mat_rhs(i, j)));
-                    // do we need this ??
-		}
-                // Dirichlet not taken into account
-                // else
-                //     RHS(asm_map[i]) -= lhs(i, j) * dirichlet_data(j);
+                else
+                    RHS(asm_map[i]) -= lhs(i,j) * dirichlet_data(j);
             }
 
             RHS(asm_map[i]) += rhs(i);
-            // RHS_F(asm_map[i]) += rhs(i);
-            // do we need this ??
         }
     } // assemble()
 
@@ -1155,12 +1194,8 @@ class heat_UC_assembler
                    const vector_type&              rhs)
     {
         auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
+                                if( !finite_space_bound.is_bnd(msh, fc) or !finite_space_bound.is_known_BC(msh, fc))
                                     return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
                                 return true;
                             };
 
@@ -1367,12 +1402,8 @@ class heat_UC_assembler
             = solution.block(cell_offset * cbs * (time_degree+1) * time_steps + cbs * (time_degree+1) * n_step, 0, (time_degree+1)*cbs, 1);
 
         auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                                if( !msh.is_boundary(fc) )
+                                if( !finite_space_bound.is_bnd(msh, fc) or !finite_space_bound.is_known_BC(msh, fc))
                                     return false;
-                                auto bnd_id = msh.boundary_id(fc);
-                                for (auto it = not_bnd.begin(); it != not_bnd.end(); it++)
-                                    if(bnd_id == *it)
-                                        return false;
                                 return true;
                             };
 
@@ -1463,9 +1494,9 @@ class heat_UC_assembler
 
 template<typename Mesh>
 auto
-make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps, bool BC_known = false)
+make_heat_UC_assembler(const Mesh& msh, const hho_degree_info& hdi, size_t time_degree, size_t time_steps, finite_trace_bound<Mesh> finite_space_bound)
 {
-    return heat_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps, BC_known);
+    return heat_UC_assembler<Mesh>(msh, hdi, time_degree, time_steps, finite_space_bound);
 }
 
 //////////////////////////////////////////////////////
@@ -1818,7 +1849,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
         auto fc1 = fcs1[face_i];
-        if( !finite_space.is_dirichlet(msh, fc1) )
+        if( !finite_space.is_bnd(msh, fc1) or finite_space.is_known_BC(msh, fc1) )
             continue;
 
         // compute rhs proj contrib
@@ -1844,7 +1875,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
         auto fc2 = fcs2[face_i];
-        if( !finite_space.is_dirichlet(msh, fc2) )
+        if( !finite_space.is_bnd(msh, fc2) or finite_space.is_known_BC(msh, fc2) )
             continue;
 
         // compute rhs proj contrib
@@ -1894,7 +1925,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
         auto fc1 = fcs1[face_i];
-        if( !finite_space.is_dirichlet(msh, fc1) )
+        if( !finite_space.is_bnd(msh, fc1) or finite_space.is_known_BC(msh, fc1) )
             continue;
 
         // compute rhs proj contrib
@@ -1920,7 +1951,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
         auto fc2 = fcs2[face_i];
-        if( !finite_space.is_dirichlet(msh, fc2) )
+        if( !finite_space.is_bnd(msh, fc2) or finite_space.is_known_BC(msh, fc2) )
             continue;
 
         // compute rhs proj contrib
@@ -1964,7 +1995,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
         auto fc1 = fcs1[face_i];
-        if( !finite_space.is_dirichlet(msh, fc1) )
+        if( !finite_space.is_bnd(msh, fc1) or finite_space.is_known_BC(msh, fc1) )
             continue;
 
         // compute rhs proj contrib
@@ -1997,7 +2028,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
     for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
     {
         auto fc2 = fcs2[face_i];
-        if( !finite_space.is_dirichlet(msh, fc2) )
+        if( !finite_space.is_bnd(msh, fc2) or finite_space.is_known_BC(msh, fc2) )
             continue;
 
         // compute rhs proj contrib
@@ -2040,7 +2071,7 @@ make_q_bound(const Mesh& msh, const typename Mesh::cell_type& cl1,
         for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
         {
             auto fc = fcs1[face_i];
-            if( !finite_space.is_dirichlet(msh, fc) )
+            if( !finite_space.is_bnd(msh, fc) or finite_space.is_known_BC(msh, fc) )
                 continue;
 
             const auto n  = normal(msh, cl1, fc);
@@ -2092,19 +2123,8 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto num_cells = msh.cells_size();
     auto nb_tot_faces = msh.faces_size();
 
-    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, false);
-
-    const bool EXPORT_NOISE = false;
-    const bool known_init_datum = true;
-
-    auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
-    auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
-
-    timecounter tc;
-
-    scalar_type final_time = 2.;
-
     // time mesh
+    scalar_type final_time = 2.;
     cout << "time_steps = " << time_steps << endl;
     scalar_type dt = final_time/time_steps;
     cout << "dt = " << dt << endl;
@@ -2120,11 +2140,26 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     auto time_stiff_bound = finite_trace_bound.make_time_stiffness_matrix(msh, time_mesh);
     auto tang_stiff_bound = finite_trace_bound.make_tang_stiffness_matrix(msh, time_mesh);
 
+    // assembler
+    auto assembler = make_heat_UC_assembler(msh, hdi, time_degree, time_steps, finite_trace_bound);
+
+    const bool EXPORT_NOISE = false;
+    const bool known_init_datum = true;
+
+    auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
+    auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension-1);
+
+    timecounter tc;
+
+
     auto rhs_fun = make_rhs_function(msh);
     auto sol_fun = make_solution_function(msh);
     auto init_fun = [sol_fun](const point_type& pt) -> scalar_type {
 			return sol_fun(0., pt);
 		    };
+    auto dirichlet_fun = [sol_fun](const scalar_type t, const point_type& pt) -> scalar_type {
+                             return sol_fun(t, pt);
+                         };
 
     auto varpi_fun = make_varpi_function(msh);
     auto B_fun = make_B_function(msh);
@@ -2425,7 +2460,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         for(size_t face_i = 0; face_i < num_faces; face_i++) // loop on boundary faces
         {
             const auto fc = fcs[face_i];
-            if( !finite_trace_bound.is_dirichlet(msh, fc) )
+            if( !finite_trace_bound.is_bnd(msh, fc) )
                 continue;
 
             /* coupling coming from the time jump penalization */
@@ -2584,7 +2619,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
             // cout << "lhs2 after = " << lhs2 << endl << endl;
 
             // assembler.assemble(msh, cl, step_i, lhs2, rhs);
-            assembler.assemble(msh, cl, step_i, lhs, rhs);
+            assembler.assemble(msh, cl, time_mesh, step_i, lhs, rhs, dirichlet_fun, time_mass);
         }
 
         /*** add the time coupling terms triplets ***/
@@ -2618,7 +2653,7 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
         for(size_t l1 = 0; l1 <= time_degree; l1++)
             rhs.block(l1*cbs, 0, cbs, 1) += space_init_rhs * time_loc(l1,0);
 
-        assembler.assemble(msh, cl, 0, lhs, rhs); // step = 0
+        assembler.assemble(msh, cl, time_mesh, 0, lhs, rhs, dirichlet_fun, time_mass); // step = 0
     }
 
     /*** add the finite trace penalization terms ***/
@@ -2648,14 +2683,14 @@ UC_heat_solver(const Mesh& msh, size_t degree, size_t time_steps, size_t time_de
     // term q_{\partial}
     for (auto& cl1 : msh)
     {
-        if( !finite_trace_bound.is_dirichlet(msh, cl1) ) // boundary faces only
+        if( !finite_trace_bound.is_finite_bound(msh, cl1) ) // faces of finite space only
             continue;
         auto fcs1    = faces(msh, cl1);
         size_t loc_size = 2 * (cbs + fcs1.size() * fbs) * (time_degree + 1);
 
         for (auto& cl2 : msh)
         {
-            if( !finite_trace_bound.is_dirichlet(msh, cl2) ) // boundary faces only
+            if( !finite_trace_bound.is_finite_bound(msh, cl2) ) // faces of finite space only
                 continue;
 
             for(size_t step_i = 0; step_i < time_steps; step_i++) {
@@ -3222,7 +3257,7 @@ tests_auto_2d()
 }
 
 /* run main with :
-   ./heat_UC
+   ./heat_UC_finite_trace
 */
 int main(int argc, char **argv)
 {
@@ -3230,76 +3265,3 @@ int main(int argc, char **argv)
     // tests_auto_2d<double>();
     return 0;
 }
-
-#if 0
-/* run main with :
-   ./heat_UC -m ../../../diskpp/meshes/2D_quads/diskpp/testmesh-16-16.quad -k 1 -N 8 -l 0
-   ./heat_UC -M 8 -k 1 -N 8 -l 0
-*/
-
-int main(int argc, char **argv)
-{
-    using T = double;
-    // disk::cartesian_mesh<T, 2> msh;
-
-    size_t      degree = 1;
-    size_t      time_degree = 0;
-    size_t      N = 8;
-    char *      mesh_filename = nullptr;
-    size_t      num_elems = 16; // for 1D only
-    int ch;
-    while ( (ch = getopt(argc, argv, "k:m:N:M:l:")) != -1 )
-    {
-	switch(ch)
-        {
-            case 'k':
-                degree = std::stoi(optarg);
-                break;
-
-            case 'm':
-                mesh_filename = optarg;
-                break;
-
-            case 'N':
-                N = std::stoi(optarg);
-                break;
-
-            case 'M':
-                num_elems = std::stoi(optarg);
-                break;
-
-            case 'l':
-                time_degree = std::stoi(optarg);
-                break;
-
-            default:
-                std::cout << "Invalid option" << std::endl;
-                return 1;
-	}
-    }
-
-    // msh = load_cartesian_2d_mesh<T>(mesh_filename);
-
-
-    if (mesh_filename == nullptr)
-    {
-        std::cout << "Mesh format: 1D uniform" << std::endl;
-
-        typedef disk::generic_mesh<T, 1>  mesh_type;
-
-        mesh_type msh;
-        disk::uniform_mesh_loader<T, 1> loader(0, 1, num_elems);
-        loader.populate_mesh(msh);
-        std::cout << "1D Mesh loaded ..." << std::endl;
-
-        UC_heat_solver(msh, degree, N, time_degree);
-
-        return 0;
-    }
-
-    auto msh = disk::load_fvca5_2d_mesh<T>(mesh_filename);
-    std::cout << "2D Mesh loaded ..." << std::endl;
-    UC_heat_solver(msh, degree, N, time_degree);
-    return 0;
-}
-#endif
