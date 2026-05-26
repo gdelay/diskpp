@@ -254,7 +254,10 @@ void solve_bjd_mf(auto assm, disk::dynamic_matrix<T>& eigvecs,
 {
     timecounter tc;
 
-    Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > AFF_lu(assm.AFF);
+    //Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > AFF_lu(assm.AFF);
+    disk::solvers::mumps_solver<T> AFF_lu;
+    AFF_lu.symmetric(true);
+    AFF_lu.factorize(assm.AFF);
 
     auto apply_A = [&]<int ncols>(
         const Eigen::Matrix<T, Eigen::Dynamic, ncols>& v) ->

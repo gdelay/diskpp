@@ -148,30 +148,31 @@ mumps_cast_from(From *from)
 
 } // namespace mumps_priv
 
-template<typename MUMPS_STRUC>
+template<typename T>
 struct mumps_state
 {
-    MUMPS_STRUC         id;
-    size_t              mflops;
+    using MUMPS_STRUC = typename mumps_priv::mumps_types<T>::MUMPS_STRUC_C;
+    MUMPS_STRUC             id;
+    size_t                  mflops;
     /* From the MUMPS documentation it is not clear which
      * should be the lifetime of Aii and Aja */
-    std::vector<int>    Aii, Aja;
+    std::vector<int>        Aii, Aja;
 
-    std::vector<int>    irhs_sparse;
-    std::vector<int>    irhs_ptr;
-    std::vector<double>      rhs_sparse;
+    std::vector<int>        irhs_sparse;
+    std::vector<int>        irhs_ptr;
+    std::vector<T>          rhs_sparse;
 };
 
 template<typename T>
 class mumps_solver
 {
     using MUMPS_STRUC = typename mumps_priv::mumps_types<T>::MUMPS_STRUC_C;
-    using mstate = mumps_state<MUMPS_STRUC>;
+    using mstate = mumps_state<T>;
     using mstate_uptr = std::unique_ptr<mstate>;
 
-    mstate_uptr state;
-    int         symmetric_flag;
-    int         parallel_flag;
+    mstate_uptr     state;
+    int             symmetric_flag;
+    int             parallel_flag;
 
 public:
     mumps_solver()
@@ -220,13 +221,15 @@ public:
             int begin = ia[i];
             int end = ia[i+1];
 
-            for (size_t j = begin; j < end; j++)
+            for (size_t j = begin; j < end; j++) {
                 state->Aii[j] = i+1;
+            }
         }
 
         state->Aja.resize( A.nonZeros() );
-        for (size_t i = 0; i < js; i++)
+        for (size_t i = 0; i < js; i++) {
             state->Aja[i] = ja[i] + 1;
+        }
         
         state->id.a = mumps_priv::mumps_cast_from<T>(data);
         state->id.irn = state->Aii.data();
@@ -242,14 +245,14 @@ public:
     /* Pseudo-compatibility with Eigen solver interface */
     template<int _Options, typename _Index>
     void
-    compute(Eigen::SparseMatrix<T, _Options, _Index>& A) const
+    compute(const Eigen::SparseMatrix<T, _Options, _Index>& A) const
     {
         factorize(A);
     }
 
     template<int nrhs>
     Eigen::Matrix<T, Eigen::Dynamic, nrhs>
-    solve(Eigen::Matrix<T, Eigen::Dynamic, nrhs>& b) const
+    solve(const Eigen::Matrix<T, Eigen::Dynamic, nrhs>& b) const
     {
         Eigen::Matrix<T, Eigen::Dynamic, nrhs> ret = b;
         T* x = ret.data();
@@ -285,7 +288,6 @@ public:
         state->id.lrhs   = n;
         state->id.nz_rhs = B.nonZeros();
 
-        // Resize storage
         state->irhs_sparse.resize(B.nonZeros());
         state->irhs_ptr.resize(nrhs + 1);
         state->rhs_sparse.resize(B.nonZeros());
@@ -294,7 +296,7 @@ public:
 
         for (int j = 0; j < nrhs; ++j)
         {
-            state->irhs_ptr[j] = nnz + 1; // 1-based
+            state->irhs_ptr[j] = nnz + 1;
 
             for (typename Eigen::SparseMatrix<T, _Options, _Index>::InnerIterator it(B, j); it; ++it)
             {
@@ -369,102 +371,24 @@ public:
     }
 };
 
-namespace mumps_priv {
-
-template<bool symmetric, typename T, int _Options, typename _Index, _Index nrhs>
-Eigen::Matrix<T, Eigen::Dynamic, nrhs>
-mumps(Eigen::SparseMatrix<T, _Options, _Index>& A, Eigen::Matrix<T, Eigen::Dynamic, nrhs>& b)
-{
-    using MUMPS_STRUC = typename mumps_priv::mumps_types<T>::MUMPS_STRUC_C;
-    
-    MUMPS_STRUC         id;
-    
-    id.job = MUMPS_JOB_INIT;
-    id.par = 1;
-
-    if constexpr (symmetric)
-        id.sym = 1;
-    else
-        id.sym = 0;
-
-    id.comm_fortran = FORTRAN_MADNESS_MAGIC;
-
-    mumps_priv::call_mumps(&id);
-    
-    if ( A.rows() != A.cols() )
-        throw std::invalid_argument("Only square matrices");
-
-    static_assert( !(_Options & Eigen::RowMajor), "CSR not supported yet.");
-    
-    A.makeCompressed();
-
-    int     N       = A.rows();
-    T *     data    = A.valuePtr();
-    int *   ia      = A.outerIndexPtr();
-    int     js      = A.nonZeros();
-    int *   ja      = A.innerIndexPtr();
-    int     is      = A.innerSize();
-
-    std::vector<int>    Aii;
-    Aii.resize( A.nonZeros() );
-
-    /* Convert CSC to COO */
-    for (int i = 0; i < is; i++)
-    {
-        int begin = ia[i];
-        int end = ia[i+1];
-
-        for (size_t j = begin; j < end; j++)
-            Aii[j] = i+1;
-    }
-
-    for (size_t i = 0; i < js; i++)
-        ja[i] += 1.;
-    
-    id.a = mumps_priv::mumps_cast_from<T>(data);
-    id.irn = Aii.data();
-    id.jcn = ja;
-    id.n = A.rows();
-    id.nz = A.nonZeros();
-
-    id.icntl[0]= -1;//6;    // Suppress error output
-    id.icntl[1]= -1;//6;    // Suppress diagnostic output
-    id.icntl[2]= -1;//6;    // Suppress global output
-    id.icntl[3]= 2;         // Loglevel
-    
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> ret = b;
-    T* x = ret.data();
-    
-    id.nrhs = (nrhs > 0) ? nrhs : b.cols();
-    id.lrhs = b.rows();
-    id.rhs = mumps_priv::mumps_cast_from<T>(ret.data());
-
-    id.job = MUMPS_JOB_EVERYTHING;
-    mumps_priv::call_mumps(&id);
-    
-    for (size_t i = 0; i < js; i++)
-        ja[i] -= 1.;
-    
-    id.job = MUMPS_JOB_TERMINATE;
-    mumps_priv::call_mumps(&id);
-    
-    return ret;
-}
-
-} //namespace mumps_priv
 
 template<typename T, int _Options, typename _Index, _Index nrhs>
 Eigen::Matrix<T, Eigen::Dynamic, nrhs>
 mumps_ldlt(Eigen::SparseMatrix<T, _Options, _Index>& A, Eigen::Matrix<T, Eigen::Dynamic, nrhs>& b)
 {
-    return mumps_priv::mumps<true>(A,b);
+    mumps_solver<T> solver;
+    solver.symmetric(true);
+    solver.factorize(A);
+    return solver.solve(b);
 }
 
 template<typename T, int _Options, typename _Index, _Index nrhs>
 Eigen::Matrix<T, Eigen::Dynamic, nrhs>
 mumps_lu(Eigen::SparseMatrix<T, _Options, _Index>& A, Eigen::Matrix<T, Eigen::Dynamic, nrhs>& b)
 {
-    return mumps_priv::mumps<false>(A,b);
+    mumps_solver<T> solver;
+    solver.factorize(A);
+    return solver.solve(b);
 }
 
 } // namespace disk::solvers
