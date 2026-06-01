@@ -451,7 +451,7 @@ int main(int argc, char **argv)
             } else if (std::string(optarg) == "quad") {
                 cfg.source = mesh_source::internal_quad;
             } else if (std::string(optarg) == "hex") {
-                cfg.source = mesh_source::internal_tri;
+                cfg.source = mesh_source::internal_hex;
             } else {
                 std::cout << "invalid mesh type" << std::endl;
             }
@@ -538,12 +538,13 @@ int main(int argc, char **argv)
         mesh_type msh;
         auto mesher = disk::make_fvca5_hex_mesher(msh);
 
-        msh.transform( [&](const typename mesh_type::point_type& pt) {
-            return typename mesh_type::point_type{pt.x(), 1.1*pt.y()};
-        } );
-
         for (int i = 0; i < cfg.reflevels; i++) {
             mesher.make_level(i);
+
+
+            msh.transform( [&](const typename mesh_type::point_type& pt) {
+                return typename mesh_type::point_type{pt.x(), 1.1*pt.y()};
+            } );
         
             std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
             run_eigsolver(msh, cfg);
