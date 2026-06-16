@@ -51,6 +51,8 @@ enum class mesh_source {
     internal_tri,
     internal_quad,
     internal_hex,
+    internal_tet,
+    internal_brick,
     external
 };
 
@@ -452,6 +454,10 @@ int main(int argc, char **argv)
                 cfg.source = mesh_source::internal_quad;
             } else if (std::string(optarg) == "hex") {
                 cfg.source = mesh_source::internal_hex;
+            } else if (std::string(optarg) == "tet") {
+                cfg.source = mesh_source::internal_tet;
+            } else if (std::string(optarg) == "brick") {
+                cfg.source = mesh_source::internal_brick;
             } else {
                 std::cout << "invalid mesh type" << std::endl;
             }
@@ -515,6 +521,24 @@ int main(int argc, char **argv)
         }
     }
 
+    if (cfg.source == mesh_source::internal_tet) {
+        using mesh_type = disk::simplicial_mesh<T, 3>;
+        mesh_type msh;
+        auto mesher = disk::make_simple_mesher(msh);
+        mesher.refine();
+
+        msh.transform( [&](const typename mesh_type::point_type& pt) {
+            return typename mesh_type::point_type{pt.x(), 1.1*pt.y(), 1.2*pt.z()};
+        } );
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.refine();
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+
     if (cfg.source == mesh_source::internal_quad) {
         using mesh_type = disk::cartesian_mesh<T, 2>;
         mesh_type msh;
@@ -532,6 +556,26 @@ int main(int argc, char **argv)
             run_eigsolver(msh, cfg);
         }
     }
+
+    /*
+    if (cfg.source == mesh_source::internal_brick) {
+        using mesh_type = disk::cartesian_mesh<T, 3>;
+        mesh_type msh;
+        auto mesher = disk::make_simple_mesher(msh);
+        mesher.refine();
+
+        msh.transform( [&](const typename mesh_type::point_type& pt) {
+            return typename mesh_type::point_type{pt.x(), 1.1*pt.y(), 1.2*pt.z()};
+        } );
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.refine();
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+    */
 
     if (cfg.source == mesh_source::internal_hex) {
         using mesh_type = disk::generic_mesh<T, 2>;
