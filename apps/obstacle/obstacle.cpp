@@ -36,7 +36,7 @@
 #include "diskpp/solvers/direct_solvers.hpp"
 #include "diskpp/common/colormanip.h"
 #include "diskpp/common/timecounter.hpp"
-
+#include "diskpp/mesh/meshgen.hpp"
 using namespace disk;
 using namespace Eigen;
 
@@ -882,7 +882,12 @@ obstacle_solver_strong(const Mesh& msh,
         vector_type sol = vector_type::Zero(systsz);
 
         tc.tic();
-        disk::solvers::sparse_lu(assembler.LHS, assembler.RHS, sol);
+        auto status = disk::solvers::sparse_lu(assembler.LHS, assembler.RHS,
+            sol, disk::solvers::direct_solver::sparselu);
+        if (status != disk::solvers::direct_solver_status::ok) {
+            std::cout << "LU factorization failed" << std::endl;
+            return false;
+        }
         tc.toc();
         std::cout << "    Solution time: " << tc << std::endl;
 
@@ -1023,7 +1028,12 @@ obstacle_solver_nitsche(const Mesh& msh,
         vector_type sol = vector_type::Zero(systsz);
 
         tc.tic();
-        disk::solvers::sparse_lu(assembler.LHS, assembler.RHS, sol);
+        auto status = disk::solvers::sparse_lu(assembler.LHS, assembler.RHS,
+            sol, disk::solvers::direct_solver::sparselu);
+        if (status != disk::solvers::direct_solver_status::ok) {
+            std::cout << "LU factorization failed" << std::endl;
+            return false;
+        }
         tc.toc();
         std::cout << "    Solution time: " << tc << std::endl;
 
@@ -1312,6 +1322,89 @@ do_autotest(const std::vector<std::string>& meshes, const char *outfile, size_t 
 
 template<typename T>
 void
+do_autotest(const char *outfile, size_t degree)
+{
+    std::vector<run_info<T>>    ri_strong;
+    std::vector<run_info<T>>    ri_nitsche;
+
+    obstacle_solver_config<T> config;
+    config.degree = degree;
+    config.penalization = 100;
+
+    run_info<T> ri;
+
+    using mesh_type = disk::triangular_mesh<T>;
+    using point_type = typename mesh_type::point_type;
+    mesh_type msh;
+    auto mesher = disk::make_simple_mesher(msh);
+    mesher.refine();
+
+    msh.transform(
+        [](const point_type& pt) -> auto {
+            auto px = -1 * ( 1-pt.x() ) + 1 * pt.x();
+            auto py = -1 * ( 1-pt.y() ) + 1 * pt.y();
+            return typename mesh_type::point_type({px, py});
+        }
+    );
+
+    for (size_t i = 0; i < 4; i++)
+    {
+        mesher.refine();
+        config.mode = bc_mode::BC_STRONG;
+        obstacle_solver(msh, config, ri);
+        ri_strong.push_back(ri);
+
+        config.mode = bc_mode::BC_NITSCHE;
+        obstacle_solver(msh, config, ri);
+        ri_nitsche.push_back(ri);
+    }
+
+    auto compute_rate = [](const run_info<T>& prev, const run_info<T>& cur) -> T {
+        return std::log(prev.error/cur.error)/std::log(prev.mesh_h/cur.mesh_h);
+    };
+
+    std::ofstream ofs(outfile);
+
+    auto fmtfl = [](std::ostream& os) -> std::ostream& {
+        os << std::setw(10) << std::setprecision(3) << std::scientific;
+        return os;
+    };
+
+    auto fmtrate = [](std::ostream& os) -> std::ostream& {
+        os << std::setw(10) << std::setprecision(3) << std::defaultfloat;
+        return os;
+    };
+
+    assert(ri_strong.size() == ri_nitsche.size());
+    for (size_t i = 0; i < ri_strong.size(); i++)
+    {
+        ofs << fmtfl << ri_strong[i].mesh_h << "  ";
+        ofs << fmtfl << ri_strong[i].error << "  ";
+
+        auto strong_rate = compute_rate(ri_strong[i-1], ri_strong[i]);
+
+        if (i > 0)
+            ofs << fmtrate << strong_rate << "  ";
+        else
+            ofs << std::setw(10) << "   ---    ";
+
+
+        ofs << fmtfl << ri_nitsche[i].error << "  ";
+
+        auto nitsche_rate = compute_rate(ri_nitsche[i-1], ri_nitsche[i]);
+
+        if (i > 0)
+            ofs << fmtrate << nitsche_rate;
+        else
+            ofs << std::setw(10) << "   ---   ";
+
+        ofs << std::endl;
+    }
+
+}
+
+template<typename T>
+void
 launch_autotests(void)
 {
     std::vector<std::string> meshfiles;
@@ -1365,14 +1458,16 @@ launch_autotests(void)
     do_autotest<T>(meshfiles, "hexas_k0.txt", 0);
     do_autotest<T>(meshfiles, "hexas_k1.txt", 1);
 */
-    meshfiles.clear();
-    meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_10.msh");
-    meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_20.msh");
-    meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_30.msh");
-    meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_40.msh");
+    //meshfiles.clear();
+    //meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_10.msh");
+    //meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_20.msh");
+    //meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_30.msh");
+    //meshfiles.push_back("../../../meshes/3D_general/fvca6/dbls_40.msh");
 
     //do_autotest<T>(meshfiles, "prisms_k0.txt", 0);
-    do_autotest<T>(meshfiles, "prisms_k1.txt", 1);
+    //do_autotest<T>(meshfiles, "prisms_k1.txt", 1);
+    do_autotest<T>("triangles_k0.txt", 0);
+    do_autotest<T>("triangles_k1.txt", 1);
 }
 
 int main(int argc, char **argv)
