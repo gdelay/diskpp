@@ -132,14 +132,23 @@ block_jacobi_davidson(const bjd_params& params,
             innerp.verbose = false;
             dv s = dv::Zero( r.rows() );
             using id = disk::solvers::identity;
+            
             auto status = bicgstab_mf(innerp, corrLHS, (-r).eval(), s, id{});
-
             switch (status)
             {
                 case iterative_solver_status::converged: std::cout << 'C'; break;
                 case iterative_solver_status::diverged: std::cout << 'D'; break;
                 case iterative_solver_status::hit_max_iter: std::cout << 'I'; break;
             }
+
+            //status = minres_mf(innerp, corrLHS, (-r).eval(), s, id{});
+            //switch (status)
+            //{
+            //    case iterative_solver_status::converged: std::cout << 'c'; break;
+            //    case iterative_solver_status::diverged: std::cout << 'd'; break;
+            //    case iterative_solver_status::hit_max_iter: std::cout << 'i'; break;
+            //}
+            
             std::cout << std::flush;
 
             /* Add the solution to the current search space */
@@ -150,7 +159,7 @@ block_jacobi_davidson(const bjd_params& params,
         }
         //std::cout << maxnorm << " " << prev_r << std::endl;
 
-        if ( (maxnorm/prev_r) > 1.1 ) {
+        if ( (maxnorm/prev_r) > 1.1 and innerp.max_iter < 1000 ) {
             innerp.max_iter *= 2;
         }
         prev_r = maxnorm;

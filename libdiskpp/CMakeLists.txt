@@ -42,6 +42,11 @@ find_package(Eigen3 REQUIRED)
 target_link_libraries(diskpp INTERFACE Eigen3::Eigen)
 
 ######################################################################
+## Find Spectra
+add_subdirectory(contrib/spectra)
+target_link_libraries(diskpp INTERFACE Spectra)
+
+######################################################################
 ## MUMPS solver
 find_package(MUMPS)
 if (MUMPS_FOUND)
@@ -160,7 +165,7 @@ install(EXPORT DiskppTargets
     DESTINATION lib/cmake/diskpp
 )
 
-export(TARGETS diskpp triangle jburkardt gmshtools sgr sol2 diskpp_highfive
+export(TARGETS diskpp triangle jburkardt gmshtools sgr sol2 diskpp_highfive Spectra
        NAMESPACE diskpp::
        FILE "${CMAKE_CURRENT_BINARY_DIR}/DiskppTargets.cmake")
 

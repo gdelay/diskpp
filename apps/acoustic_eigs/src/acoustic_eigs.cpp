@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 #include <filesystem>
+#include <iomanip>
 
 
 
@@ -37,6 +38,32 @@
 #include "diskpp/solvers/direct_solvers.hpp"
 
 #include "diskpp/solvers/eigensolvers.hpp"
+
+
+
+enum class eigsolver_type {
+    feast_full,
+    feast_mf,
+    bjd_mf
+};
+
+enum class mesh_source {
+    internal_tri,
+    internal_quad,
+    internal_hex,
+    internal_tet,
+    internal_brick,
+    external
+};
+
+struct config {
+    eigsolver_type  eigsolver = eigsolver_type::feast_full;
+    size_t          order = 0;
+    size_t          reflevels = 5;
+    mesh_source     source = mesh_source::external;
+    std::string     mesh_filename;
+    std::string     silo_filename;
+};
 
 namespace disk {
 
@@ -162,9 +189,141 @@ acoustic_eigs_dg(Mesh& msh, size_t degree,
     }
 }
 
+template<typename T>
+void solve_feast_dense(auto assm, disk::dynamic_matrix<T>& eigvecs,
+    disk::dynamic_vector<T>& eigvals)
+{
+    timecounter tc;
+
+    std::cout << "MUMPS factorization..." << std::flush;
+    tc.tic();
+    disk::solvers::mumps_solver<T> AFF_lu_mumps;
+    AFF_lu_mumps.factorize(assm.AFF);
+    std::cout << tc.toc() << " seconds\n";
+
+    std::cout << "FEAST eigensolver (dense)" << std::endl;
+    tc.tic();
+    disk::solvers::feast_eigensolver_params<T> params;
+    params.subspace_size = 20;
+    params.max_iter = 10;
+    params.min_eigval = 1;
+    params.max_eigval = 50;
+    params.verbose = true;
+    params.tolerance = 7;
+
+    std::cout << "Computing KTT\n";
+    disk::dynamic_matrix<T> KTT =
+        assm.ATT - assm.ATF*AFF_lu_mumps.solve(assm.AFT);
+    std::cout << "Entering FEAST\n";
+    disk::solvers::feast(params, KTT, assm.BTT, eigvecs, eigvals);
+
+    std::cout << "Eigensolver time: " << tc.toc() << " seconds\n";
+}
+
+template<typename T>
+void solve_feast_mf(auto assm, disk::dynamic_matrix<T>& eigvecs,
+    disk::dynamic_vector<T>& eigvals)
+{
+    timecounter tc;
+
+    Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > AFF_lu(assm.AFF);
+
+    auto apply_A = [&]<int ncols>(
+        const Eigen::Matrix<T, Eigen::Dynamic, ncols>& v) ->
+            Eigen::Matrix<T, Eigen::Dynamic, ncols> {
+        Eigen::Matrix<T, Eigen::Dynamic, ncols> z = assm.AFT*v;
+        return assm.ATT*v - assm.ATF*AFF_lu.solve(z);
+    };
+
+    std::cout << "FEAST eigensolver (matrix-free)" << std::endl;
+    tc.tic();
+    disk::solvers::feast_eigensolver_params<T> params;
+    params.subspace_size = 20;
+    params.max_iter = 10;
+    params.min_eigval = 1;
+    params.max_eigval = 50;
+    params.verbose = true;
+    params.tolerance = 7;
+    disk::solvers::feast_mf(params, apply_A, assm.BTT, eigvecs, eigvals);
+
+    std::cout << "Eigensolver time: " << tc.toc() << " seconds\n";
+}
+
+
+template<typename T>
+void solve_bjd_mf(auto assm, disk::dynamic_matrix<T>& eigvecs,
+    disk::dynamic_vector<T>& eigvals)
+{
+    timecounter tc;
+
+    //Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > AFF_lu(assm.AFF);
+    disk::solvers::mumps_solver<T> AFF_lu;
+    AFF_lu.symmetric(true);
+    AFF_lu.factorize(assm.AFF);
+
+    auto apply_A = [&]<int ncols>(
+        const Eigen::Matrix<T, Eigen::Dynamic, ncols>& v) ->
+            Eigen::Matrix<T, Eigen::Dynamic, ncols> {
+        Eigen::Matrix<T, Eigen::Dynamic, ncols> z = assm.AFT*v;
+        return assm.ATT*v - assm.ATF*AFF_lu.solve(z);
+    };
+
+    std::cout << "Block Jacobi-Davidson eigensolver" << std::endl;
+    tc.tic();
+    disk::solvers::bjd_params params;
+    params.block_size = 10;
+    params.max_outer_iters = 200;
+    params.max_inner_iters = 5;
+    params.max_subspace_growth = 10;
+    params.inner_tol = 1e-4;
+    params.verbose = true;
+    disk::solvers::block_jacobi_davidson(params, apply_A,
+        assm.BTT, eigvecs, eigvals);
+    std::cout << "Eigensolver time: " << tc.toc() << " seconds\n";
+}
+
+#if 0
+template<typename T>
+void solve_spectra(auto assm, disk::dynamic_matrix<T>& eigvecs,
+    disk::dynamic_vector<T>& eigvals)
+{
+    timecounter tc;
+
+    Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > AFF_lu(assm.AFF);
+    Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > BTT_lu(assm.BTT);
+
+    auto apply_A = [&]<int ncols>(
+        const Eigen::Matrix<T, Eigen::Dynamic, ncols>& v) ->
+            Eigen::Matrix<T, Eigen::Dynamic, ncols> {
+        Eigen::Matrix<T, Eigen::Dynamic, ncols> z = assm.AFT*v;
+        return assm.ATT*v - assm.ATF*AFF_lu.solve(z);
+    };
+
+    auto solve_B = [&](const Eigen::Matrix<T, Eigen::Dynamic, ncols>& v) ->
+            Eigen::Matrix<T, Eigen::Dynamic, ncols> {
+        Eigen::Matrix<T, Eigen::Dynamic, ncols> z = assm.AFT*v;
+        return assm.ATT*v - assm.ATF*AFF_lu.solve(z);
+    };
+
+    std::cout << "Block Jacobi-Davidson eigensolver" << std::endl;
+    tc.tic();
+    disk::solvers::bjd_params params;
+    params.block_size = 10;
+    params.max_outer_iters = 200;
+    params.max_inner_iters = 5;
+    params.max_subspace_growth = 10;
+    params.inner_tol = 1e-4;
+    params.verbose = true;
+    disk::solvers::block_jacobi_davidson(params, apply_A,
+        assm.BTT, eigvecs, eigvals);
+    std::cout << "Eigensolver time: " << tc.toc() << " seconds\n";
+}
+#endif
+
+
 template<typename Mesh>
 void
-acoustic_eigs_hho(const Mesh& msh, size_t degree, disk::silo_database& silo)
+acoustic_eigs_hho(const Mesh& msh, const config& cfg, disk::silo_database& silo)
 {
     std::cout << "HHO eigsolver" << std::endl;
     using namespace disk::basis;
@@ -175,7 +334,7 @@ acoustic_eigs_hho(const Mesh& msh, size_t degree, disk::silo_database& silo)
     using cbasis_type = typename hho_space<Mesh>::cell_basis_type;
     using fbasis_type = typename hho_space<Mesh>::face_basis_type;
 
-    degree_info di(degree);
+    degree_info di(cfg.order);
 
     auto assm = disk::hho::eigenvalue_block_assembler<Mesh, cbasis_type, fbasis_type>(
         msh, di.cell, di.face
@@ -207,81 +366,32 @@ acoustic_eigs_hho(const Mesh& msh, size_t degree, disk::silo_database& silo)
 
     std::cout << tc.toc() << " seconds\n";
 
-    /********* LU *********/
-    std::cout << "Computing LU of AFF and BTT..." << std::flush;
-    tc.tic();
-    Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > AFF_lu(assm.AFF);
-    Eigen::PardisoLDLT< Eigen::SparseMatrix<T> > BTT_lu(assm.BTT);
-    std::cout << tc.toc() << " seconds\n";
 
     Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> eigvecs;
     Eigen::Matrix<T, Eigen::Dynamic, 1> eigvals;
 
+    if (cfg.eigsolver == eigsolver_type::feast_full) {
+        solve_feast_dense(assm, eigvecs, eigvals);
+    }
 
-    auto apply_A = [&]<int ncols>(
-        const Eigen::Matrix<T, Eigen::Dynamic, ncols>& v) ->
-            Eigen::Matrix<T, Eigen::Dynamic, ncols> {
-        Eigen::Matrix<T, Eigen::Dynamic, ncols> z = assm.AFT*v;
-        return assm.ATT*v - assm.ATF*AFF_lu.solve(z);
-    };
+    if (cfg.eigsolver == eigsolver_type::feast_mf) {
+        solve_feast_mf(assm, eigvecs, eigvals);
+    }
 
-    auto solve_BTT = [&](const dynamic_vector<T>& v) -> dynamic_vector<T> {
-        return BTT_lu.solve(v);
-    };
+    if (cfg.eigsolver == eigsolver_type::bjd_mf) {
+        solve_bjd_mf(assm, eigvecs, eigvals);
+    }
 
-//#if 0
-    /********* EIGSOLVER (BJD) *********/
-    std::cout << "Block Jacobi-Davidson eigensolver" << std::endl;
-    tc.tic();
-    disk::solvers::bjd_params params;
-    params.block_size = 10;
-    params.max_outer_iters = 200;
-    params.max_inner_iters = 5;
-    params.max_subspace_growth = 10;
-    params.inner_tol = 1e-4;
-    params.verbose = true;
-    disk::solvers::block_jacobi_davidson(params, apply_A,
-        assm.BTT, eigvecs, eigvals);
-    std::cout << "Eigensolver time: " << tc.toc() << " seconds\n";
-//#endif
-    
-#if 0
-    /********* EIGSOLVER (FEAST) *********/
-    std::cout << "FEAST eigensolver" << std::endl;
-    tc.tic();
-    disk::solvers::feast_eigensolver_params<T> params;
-    params.subspace_size = 20;
-    params.max_iter = 10;
-    params.min_eigval = 1;
-    params.max_eigval = 50;
-    params.verbose = true;
-    params.tolerance = 7;
-    disk::solvers::feast_mf(params, apply_A,
-        assm.BTT, eigvecs, eigvals);
+    for (auto& ev : eigvals) {
+        ev -= 1.0;
+    }
 
-    //std::cout << "Computing KTT\n";
-    //disk::sparse_matrix<T> KTT = assm.ATT - assm.ATF*AFF_lu.solve(assm.AFT);
-    //std::cout << "Entering FEAST\n";
-    //disk::solvers::feast(params, KTT, assm.BTT, eigvecs, eigvals);
-
-    std::cout << "Eigensolver time: " << tc.toc() << " seconds\n";
-#endif
-
-
-    T pisq = M_PI * M_PI;
-
-    //Eigen::Matrix<T, Eigen::Dynamic, 1> eigvals_ref =
-    //    Eigen::Matrix<T, Eigen::Dynamic, 1>::Zero(12);
-    //eigvals_ref << 1,
-    //    pisq+1, pisq+1, 2*pisq+1, 4*pisq+1, 4*pisq+1, 5*pisq+1,
-    //    5*pisq+1, 8*pisq+1, 9*pisq+1, 9*pisq+1, 10*pisq+1, 10*pisq+1
-    //;
-
+    std::cout << "Computed: " << std::setprecision(15) << eigvals.transpose() << std::endl;
 
     silo.add_mesh(msh, "hmesh");
     for (size_t col = 0; col < eigvecs.cols(); col++) {
         Eigen::Matrix<T, Eigen::Dynamic, 1> eigvec = eigvecs.col(col);
-        std::cout << eigvals(col) << std::endl;
+        //std::cout << eigvals(col) << std::endl;
         std::vector<T> u;
         for (auto& cl : msh) {
             auto ofs = cbasis_type::size_of_degree(di.cell) * offset(msh, cl);
@@ -291,32 +401,199 @@ acoustic_eigs_hho(const Mesh& msh, size_t degree, disk::silo_database& silo)
         std::string vname = "hho_eigfun_" + std::to_string(col);
         silo.add_variable("hmesh", vname, u, disk::zonal_variable_t);
     }
-
-    //auto opt_evs = ::priv::inv_powiter(KTT, assm.BTT, 57.0);
-    //if (opt_evs) {
-    //    auto [vec, val] = *opt_evs;
-    //    std::cout << "with powiter: " << val << std::endl;
-    //}
 }
 
+}
+
+template<typename Mesh>
+void
+run_eigsolver(const Mesh& msh, const config& cfg)
+{
+    disk::silo_database db;
+    db.create(cfg.silo_filename);
+
+    acoustic_eigs_hho(msh, cfg, db);
 }
 
 int main(int argc, char **argv)
 {
-    std::string mesh_filename = argv[1];
+    resmon rm("main");
+
     using T = double;
-    using mesh_type = disk::simplicial_mesh<T,3>;
-    mesh_type msh;
-    disk::gmsh_geometry_loader< mesh_type > loader;
-    loader.read_mesh(mesh_filename);
-    loader.populate_mesh(msh);
 
-    disk::silo_database db;
-    db.create("acoustic_eigs.silo");
-    //acoustic_eigs_dg(msh, 2, 10, db);
+    config cfg;
 
-    acoustic_eigs_hho(msh, 2, db);
+    int opt;
+    while ((opt = getopt(argc, argv, "e:f:k:m:o:r:")) != -1) {
+        switch (opt) {
+
+        case 'e':
+            if (std::string(optarg) == "feast_full") {
+                cfg.eigsolver = eigsolver_type::feast_full;
+            } else if (std::string(optarg) == "feast_mf") {
+                cfg.eigsolver = eigsolver_type::feast_mf;
+            } else if (std::string(optarg) == "bjd_mf") {
+                cfg.eigsolver = eigsolver_type::bjd_mf;
+            } else {
+                std::cout << "invalid solver type" << std::endl;
+            }
+            break;
+
+        case 'f':
+            cfg.mesh_filename = optarg;
+            break;
+        
+        case 'k':
+            cfg.order = std::stoul(optarg);
+            break;
+
+        case 'm':
+            if (std::string(optarg) == "tri") {
+                cfg.source = mesh_source::internal_tri;
+            } else if (std::string(optarg) == "quad") {
+                cfg.source = mesh_source::internal_quad;
+            } else if (std::string(optarg) == "hex") {
+                cfg.source = mesh_source::internal_hex;
+            } else if (std::string(optarg) == "tet") {
+                cfg.source = mesh_source::internal_tet;
+            } else if (std::string(optarg) == "brick") {
+                cfg.source = mesh_source::internal_brick;
+            } else {
+                std::cout << "invalid mesh type" << std::endl;
+            }
+            break;
+
+        case 'o':
+            cfg.silo_filename = optarg;
+            break;
+
+        case 'r':
+            cfg.reflevels = std::stoul(optarg);
+            break;
+        }
+    }
 
 
+    if (cfg.mesh_filename != "") {
+ 
+        if (std::regex_match(cfg.mesh_filename, std::regex(".*\\.geo2s$") ))
+        {
+            std::cout << "Guessed mesh format: GMSH 2D simplicials" << std::endl;
+            using mesh_type = disk::triangular_mesh<T>;
+            mesh_type msh;
+            disk::gmsh_geometry_loader< mesh_type > loader;
+            loader.read_mesh(cfg.mesh_filename);
+            loader.populate_mesh(msh);
+
+            run_eigsolver(msh, cfg);
+            return 0;
+        }
+  
+        if (std::regex_match(cfg.mesh_filename, std::regex(".*\\.geo3s$") ))
+        {
+            std::cout << "Guessed mesh format: GMSH 3D simplicials" << std::endl;
+            using mesh_type = disk::tetrahedral_mesh<T>;
+            mesh_type msh;
+            disk::gmsh_geometry_loader< mesh_type > loader;
+            loader.read_mesh(cfg.mesh_filename);
+            loader.populate_mesh(msh);
+
+            run_eigsolver(msh, cfg);
+            return 0;
+        }
+    }
+
+    if (cfg.source == mesh_source::internal_tri) {
+        using mesh_type = disk::simplicial_mesh<T, 2>;
+        mesh_type msh;
+        auto mesher = disk::make_simple_mesher(msh);
+        mesher.refine();
+
+        msh.transform( [&](const typename mesh_type::point_type& pt) {
+            return typename mesh_type::point_type{pt.x(), 1.1*pt.y()};
+        } );
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.refine();
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+
+    if (cfg.source == mesh_source::internal_tet) {
+        using mesh_type = disk::simplicial_mesh<T, 3>;
+        mesh_type msh;
+        auto mesher = disk::make_simple_mesher(msh);
+        mesher.refine();
+
+        msh.transform( [&](const typename mesh_type::point_type& pt) {
+            return typename mesh_type::point_type{pt.x(), 1.1*pt.y(), 1.2*pt.z()};
+        } );
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.refine();
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+
+    if (cfg.source == mesh_source::internal_quad) {
+        using mesh_type = disk::cartesian_mesh<T, 2>;
+        mesh_type msh;
+        auto mesher = disk::make_simple_mesher(msh);
+        mesher.refine();
+
+        msh.transform( [&](const typename mesh_type::point_type& pt) {
+            return typename mesh_type::point_type{pt.x(), 1.1*pt.y()};
+        } );
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.refine();
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+
+    /*
+    if (cfg.source == mesh_source::internal_brick) {
+        using mesh_type = disk::cartesian_mesh<T, 3>;
+        mesh_type msh;
+        auto mesher = disk::make_simple_mesher(msh);
+        mesher.refine();
+
+        msh.transform( [&](const typename mesh_type::point_type& pt) {
+            return typename mesh_type::point_type{pt.x(), 1.1*pt.y(), 1.2*pt.z()};
+        } );
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.refine();
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+    */
+
+    if (cfg.source == mesh_source::internal_hex) {
+        using mesh_type = disk::generic_mesh<T, 2>;
+        mesh_type msh;
+        auto mesher = disk::make_fvca5_hex_mesher(msh);
+
+        for (int i = 0; i < cfg.reflevels; i++) {
+            mesher.make_level(i);
+
+
+            msh.transform( [&](const typename mesh_type::point_type& pt) {
+                return typename mesh_type::point_type{pt.x(), 1.1*pt.y()};
+            } );
+        
+            std::cout << ">>>>>>>> DIAM: " << disk::average_diameter(msh) << std::endl;
+            run_eigsolver(msh, cfg);
+        }
+    }
+    
     return 0;
 }

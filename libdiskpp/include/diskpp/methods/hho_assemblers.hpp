@@ -244,6 +244,8 @@ class eigenvalue_block_assembler {
     size_t      face_basis_size;
     size_t      face_degree;
 
+    bool        AFF_blockdiag = false;
+
 public:
     using matrix_type = dynamic_matrix<ScalT>;
     using vector_type = dynamic_vector<ScalT>;
@@ -323,6 +325,9 @@ public:
             auto lfofsi = cell_basis_size + fnumi*face_basis_size;
             auto fbasei = face_basis_size *  offset(msh, fci);
             for (size_t fnumj = 0; fnumj < fcs.size(); fnumj++) {
+                if (AFF_blockdiag and fnumi != fnumj) {
+                    continue;
+                }
                 const auto& fcj = fcs[fnumj];
                 auto lfofsj = cell_basis_size + fnumj*face_basis_size;
                 auto fbasej = face_basis_size *  offset(msh, fcj);
@@ -394,6 +399,10 @@ public:
                 }
             }
         }
+    }
+
+    void set_AFF_blockdiag(bool val) {
+        AFF_blockdiag = val;
     }
 
     void

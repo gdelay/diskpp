@@ -10,3 +10,6 @@
 [submodule "libdiskpp/contrib/sgr"]
 	path = libdiskpp/contrib/sgr
 	url = https://github.com/datafl4sh/sgr.git
+[submodule "libdiskpp/contrib/spectra"]
+	path = libdiskpp/contrib/spectra
+	url = https://github.com/yixuan/spectra.git
