@@ -51,8 +51,12 @@ sparse_lu(Eigen::SparseMatrix<T, _Options, _Index>& A,
 
 #ifdef HAVE_MUMPS
     case direct_solver::mumps: {
-        x = mumps_lu(A, b);
-        /* check needed */
+        mumps_solver<T> solver;
+        solver.compute(A);
+        x = solver.solve(b);
+        if (solver.failure()) {
+            return direct_solver_status::failure;
+        }
     } break;
 #endif
 
@@ -99,8 +103,13 @@ sparse_ldlt(Eigen::SparseMatrix<T, _Options, _Index>& A,
 
 #ifdef HAVE_MUMPS
     case direct_solver::mumps: {
-        x = mumps_ldlt(A, b);
-        /* check needed */
+        mumps_solver<T> solver;
+        solver.symmetric(true);
+        solver.compute(A);
+        x = solver.solve(b);
+        if (solver.failure()) {
+            return direct_solver_status::failure;
+        }
     } break;
 #endif
 

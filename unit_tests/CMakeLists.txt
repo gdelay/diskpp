@@ -1,4 +1,11 @@
-set(LINK_LIBS diskpp)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(LINK_LIBS diskpp::diskpp)
+
+add_executable(mumps mumps.cpp)
+target_link_libraries(mumps ${LINK_LIBS})
+add_test(NAME mumps COMMAND mumps)
 
 add_executable(primitives primitives.cpp)
 target_link_libraries(primitives ${LINK_LIBS})

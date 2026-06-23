@@ -161,13 +161,17 @@ feast(const feast_eigensolver_params<double>& params,
                     Qe = solver.solve(Yc);
                 } break;
 
-                case feast_inner_solver::mumps: {
 #ifdef HAVE_MUMPS
-                    Qe = mumps_lu(lhs, Yc);
-#else
-                    throw std::runtime_error("Mumps is not installed");
-#endif /* HAVE_MUMPS */
+                case feast_inner_solver::mumps: {
+                    disk::solvers::mumps_solver<complex> solver;
+                    solver.compute(lhs);
+                    if (solver.failure()) {
+                        std::cout << "FEAST: MUMPS failed" << std::endl;
+                        return feast_status::inner_solver_problem;
+                    }
+                    Qe = solver.solve(Yc);
                 }
+#endif /* HAVE_MUMPS */
             }
 
             cdm T = r * std::exp(std::complex<double>(0.0, theta_e)) * Qe;

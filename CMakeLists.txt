@@ -10,5 +10,6 @@ endif()
 
 add_subdirectory(libdiskpp)
 add_subdirectory(apps)
+add_subdirectory(unit_tests)
 
 

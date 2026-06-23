@@ -4,7 +4,7 @@
 #include <cstdio>
 
 #include "diskpp/quadratures/bits/quad_raw_gauss_lobatto.hpp"
-#include "sgr.hpp"
+#include "sgr/sgr.hpp"
 
 int main(void)
 {

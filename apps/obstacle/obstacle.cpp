@@ -882,8 +882,8 @@ obstacle_solver_strong(const Mesh& msh,
         vector_type sol = vector_type::Zero(systsz);
 
         tc.tic();
-        auto status = disk::solvers::sparse_lu(assembler.LHS, assembler.RHS,
-            sol, disk::solvers::direct_solver::sparselu);
+        auto status = disk::solvers::sparse_lu(
+            assembler.LHS, assembler.RHS, sol);
         if (status != disk::solvers::direct_solver_status::ok) {
             std::cout << "LU factorization failed" << std::endl;
             return false;
@@ -1028,8 +1028,8 @@ obstacle_solver_nitsche(const Mesh& msh,
         vector_type sol = vector_type::Zero(systsz);
 
         tc.tic();
-        auto status = disk::solvers::sparse_lu(assembler.LHS, assembler.RHS,
-            sol, disk::solvers::direct_solver::sparselu);
+        auto status = disk::solvers::sparse_lu(
+            assembler.LHS, assembler.RHS, sol);
         if (status != disk::solvers::direct_solver_status::ok) {
             std::cout << "LU factorization failed" << std::endl;
             return false;
