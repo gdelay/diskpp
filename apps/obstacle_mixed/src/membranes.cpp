@@ -328,7 +328,7 @@ public:
 
         const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
         const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
-        system_size    = 2 * (cbs * num_cells + fbs * num_other_faces);
+        system_size    = 2 * cbs * num_cells + fbs * num_other_faces;
 
         LHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
@@ -496,7 +496,7 @@ public:
         const auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
         const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
-        for(size_t i = 0; i < mult_offset; i++)
+        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
         {
             triplets.push_back( Triplet<T>(mult_offset + i, mult_offset + i, 1.0) );
         }
@@ -523,7 +523,7 @@ public:
         const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
 
-        for(size_t i = 0; i < mult_offset; i++)
+        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
         {
             auto sol_u    = prev_sol(i);
             auto sol_mult = prev_sol(mult_offset + i);
@@ -538,7 +538,7 @@ public:
         }
 
         // identity block
-        for(size_t i = 0; i < mult_offset; i++)
+        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
         {
             triplets.push_back( Triplet<T>(i, mult_offset + i, -1.0) );
         }
@@ -559,7 +559,7 @@ public:
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
 
         bool ret = true;
-        for(size_t i = 0; i < mult_offset; i++)
+        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
         {
             auto sol_u    = sol(i);
             auto sol_mult = sol(mult_offset + i);
@@ -642,33 +642,7 @@ public:
         auto cell_offset        = offset(msh, cl);
         auto cell_SOL_offset    = mult_offset + cell_offset * cbs;
 
-        vector_type ret = vector_type::Zero(cbs + num_faces*fbs);
-        ret.block(0, 0, cbs, 1) = solution.block(cell_SOL_offset, 0, cbs, 1);
-
-        for (size_t face_i = 0; face_i < num_faces; face_i++)
-        {
-            auto fc = fcs[face_i];
-
-            auto is_dirichlet = [&](const typename Mesh::face_type& fc) -> bool {
-                return msh.is_boundary(fc);
-            };
-
-            bool dirichlet = is_dirichlet(fc);
-
-            if (dirichlet)
-            {
-                // no contact on the boundary
-                for(size_t i = 0; i < fbs; i++)
-                    ret(cbs + face_i*fbs + i) = 0.0;
-            }
-            else
-            {
-                auto face_offset = offset(msh, fc);
-                auto face_SOL_offset = mult_offset
-                    + msh.cells_size() * cbs + compress_table.at(face_offset)*fbs;
-                ret.block(cbs + face_i*fbs, 0, fbs, 1) = solution.block(face_SOL_offset, 0, fbs, 1);
-            }
-        }
+        vector_type ret = solution.block(cell_SOL_offset, 0, cbs, 1);
 
         return ret;
     }
@@ -1906,7 +1880,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
     auto assembler_sc = make_condensed_assembler_Lag(msh, hdi);
     auto assembler = make_assembler_Lag(msh, hdi);
 
-    bool scond = true; // static condensation
+    bool scond = false; // static condensation
 
     for (auto& cl : msh)
     {
@@ -2016,7 +1990,6 @@ run_contact_solver(const Mesh& msh, size_t degree)
     auto multT_gp  = std::make_shared< gnuplot_output_object<T> >("multT.dat");
 
     auto uF_gp  = std::make_shared< gnuplot_output_object<T> >("uF.dat");
-    auto multF_gp  = std::make_shared< gnuplot_output_object<T> >("multF.dat");
     
 
     for (auto& cl : msh)
@@ -2043,9 +2016,6 @@ run_contact_solver(const Mesh& msh, size_t degree)
         }
 
         auto cell_dofs = fullsol.head( cb.size() );
-        auto mult_cell_dofs = mult_sol.head( cb.size() );
-
-        // std::cout << "mult = " << mult_cell_dofs << std::endl;
 
         // errors
         const auto celdeg = hdi.cell_degree();
@@ -2068,7 +2038,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
             u_L2_error += qp.weight() * (sol_fun(qp.point()) - v) * (sol_fun(qp.point()) - v);
 
             // mult-L2-error
-            T mult = mult_cell_dofs.dot( t_phi );
+            T mult = mult_sol.dot( t_phi );
             T mult_sol = mult_fun(qp.point());
             mult_L2_error += qp.weight() * (mult_sol - mult) * (mult_sol - mult);
             mult_L2_norm += qp.weight() * mult * mult;
@@ -2080,7 +2050,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
         {
             T sol_uT = cell_dofs.dot( cb.eval_functions( pts[i] ) );
             uT_gp->add_data( pts[i], sol_uT );
-            T sol_multT = mult_cell_dofs.dot( cb.eval_functions(pts[i]) );
+            T sol_multT = mult_sol.dot( cb.eval_functions(pts[i]) );
             multT_gp->add_data( pts[i], sol_multT );
         }
 
@@ -2099,12 +2069,6 @@ run_contact_solver(const Mesh& msh, size_t degree)
             T solbarF = fb.eval_functions(barF).dot(face_sol);
             uF_gp->add_data( barF, solbarF );
 
-            if( mult_sol.size() > cbs )
-            {
-                auto face_mult = mult_sol.block(cbs+face_i*fbs, 0, fbs, 1);
-                T multbarF = fb.eval_functions(barF).dot(face_mult);
-                multF_gp->add_data( barF, multbarF );
-            }
         }
         */
         
@@ -2114,7 +2078,6 @@ run_contact_solver(const Mesh& msh, size_t degree)
     postoutput.add_object(uT_gp);
     postoutput.add_object(multT_gp);
     postoutput.add_object(uF_gp);
-    postoutput.add_object(multF_gp);
     postoutput.write();
     
 
@@ -2657,9 +2620,8 @@ run_membranes_solver(const Mesh& msh, size_t degree)
  * mettre les solutions exactes en haut du fichier
  * and add the export to file (like in UC)
  * add L2-mult error ? (necessitate dual basis)
- * add static condensation
- * remettre Mumps et comparer la difference d'efficacité -> MUMPS ne fonctionne pas : il faudra avertir Matteo une fois que mon code sera prêt a être testé
- * est-ce qu'on a vraiment besoin de vector_Lagrange_basis ?
+ * enlever les composantes faces du mult
+ * deboguer outputs pour faces ?
  */
 
 
