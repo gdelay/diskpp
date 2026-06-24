@@ -642,9 +642,13 @@ public:
         auto cell_offset        = offset(msh, cl);
         auto cell_SOL_offset    = mult_offset + cell_offset * cbs;
 
-        vector_type ret = solution.block(cell_SOL_offset, 0, cbs, 1);
+        vector_type multT_dual = solution.block(cell_SOL_offset, 0, cbs, 1);
 
-        return ret;
+        const auto cb = make_scalar_Lagrange_basis(msh, cl, celdeg);
+        auto mass_matrixT = make_mass_matrix(msh, cl, cb);
+        vector_type multT_primal = mass_matrixT.ldlt().solve(multT_dual);
+
+        return multT_primal;
     }
 
     void finalize(void)
@@ -2619,8 +2623,6 @@ run_membranes_solver(const Mesh& msh, size_t degree)
  * TODO : prepare this section
  * mettre les solutions exactes en haut du fichier
  * and add the export to file (like in UC)
- * add L2-mult error ? (necessitate dual basis)
- * enlever les composantes faces du mult
  * deboguer outputs pour faces ?
  */
 
