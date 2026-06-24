@@ -1033,6 +1033,18 @@ run_membranes_solver(const Mesh& msh, size_t degree)
 /*
  * TODO : prepare this section
  * faire tous les ajouts de la partie contact
+ * check solver
+ * check outputs
+ * Static condensation
+ * rename file
+ * test info
+ * auto tests
+ * reference to the article (file and algo)
+ * cleaning the file
+ * tolerance
+ * check error mult
+ * check no faces on mult
+ * compare the results with the ones of the article
  */
 
 
