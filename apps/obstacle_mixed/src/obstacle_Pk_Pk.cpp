@@ -16,6 +16,11 @@
 /*
  * The content of this file corresponds to solving an obstacle problem with Pk elements
  * using Pk Lagrange multipliers.
+ *
+ * This code implements the scheme proposed in :
+ * Jad Dabaghi, Guillaume Delay
+ * A unified framework for high-order numerical discretizations of variational inequalities
+ * Computers and Mathematics with Applications 92 (2021) 62-75
  */
 
 #include "gnuplot_output.hpp"
@@ -610,7 +615,12 @@ contact_static_decondensation(const Mesh&                                       
 }
 
 //////////
-// Assembler using static condensation
+/* Assembler using static condensation
+ * This algorithm is described in Algorithm 2 from the work
+ * Jad Dabaghi, Guillaume Delay
+ * A unified framework for high-order numerical discretizations of variational inequalities
+ * Computers and Mathematics with Applications 92 (2021) 62-75
+ */
 //////////
 
 template<typename Mesh>
@@ -1064,8 +1074,21 @@ auto make_condensed_assembler_Lag(const Mesh& msh, hho_degree_info hdi)
 //////////////////////////////   CONTACT SOLVER   ////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 
+/////// test_info -> for error output
+template<typename T>
+class test_info {
+public:
+    test_info() : H1_u(0.) , L2_u(0.) , L2_mult(0.) , nb_dof(0) {}
+    T H1_u; // H1-error for u
+    T L2_u; // L2-error for u
+    T L2_mult; // L2-error for mult
+    size_t nb_dof; // number of degrees of freedom of the linear system
+    T h_max; // maximal cell diameter
+};
+
+/////// Contact solver
 template<typename Mesh>
-typename Mesh::coordinate_type
+test_info<typename Mesh::coordinate_type>
 run_contact_solver(const Mesh& msh, size_t degree)
 {
     using T = typename Mesh::coordinate_type;
@@ -1178,8 +1201,9 @@ run_contact_solver(const Mesh& msh, size_t degree)
 
     auto assembler_sc = make_condensed_assembler_Lag(msh, hdi);
     auto assembler = make_assembler_Lag(msh, hdi);
+    test_info<double> TI;
 
-    bool scond = false; // static condensation
+    bool scond = true; // static condensation
 
     for (auto& cl : msh)
     {
@@ -1237,7 +1261,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
                                                    sol, disk::solvers::direct_solver::sparselu);
             if (status != disk::solvers::direct_solver_status::ok) {
                 std::cout << "LU factorization failed" << std::endl;
-                return false;
+                return TI;
             }
             std::cout << "done" << std::endl;
         }
@@ -1249,7 +1273,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
             // auto status = disk::solvers::sparse_lu(assembler.LHS, assembler.RHS, sol);
             if (status != disk::solvers::direct_solver_status::ok) {
                 std::cout << "LU factorization failed" << std::endl;
-                return false;
+                return TI;
             }
             std::cout << "done" << std::endl;
         }
@@ -1347,83 +1371,94 @@ run_contact_solver(const Mesh& msh, size_t degree)
     std::cout << "            L2-error is " << std::sqrt(u_L2_error) << std::endl;
     std::cout << "            mult-L2-error is " << std::sqrt(mult_L2_error) << std::endl;
 
-    return std::sqrt(u_H1_error);
+    TI.nb_dof = systsz;
+    TI.H1_u = std::sqrt(u_H1_error);
+    TI.L2_u = std::sqrt(u_L2_error);
+    TI.L2_mult = std::sqrt(mult_L2_error);
+    TI.h_max = average_diameter(msh);
+
+    return TI;
 }
+
+//////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////   TESTS AUTO   //////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+
+
+template<typename T>
+void
+tests_auto_2d()
+{
+    typedef disk::simplicial_mesh<T, 2>  mesh_type;
+
+    // list of mesh files
+    std::vector<std::string> meshes;
+    meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
+    meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
+    meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
+    meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
+    meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri05.mesh2d");
+
+    size_t nb_meshes = meshes.size();
+
+    // list of export files
+    std::vector<std::string> files;
+    files.push_back("./test_k0.txt");
+    files.push_back("./test_k1.txt");
+    files.push_back("./test_k2.txt");
+    files.push_back("./test_k3.txt");
+
+    // we test degrees 0 to 3
+    for(int degree=0; degree <= 3; degree++)
+    {
+        std::cout << " WORKING WITH k = " << degree << std::endl;
+
+        // open the output file
+        std::ofstream file;
+        file.open (files.at(degree), std::ios::in | std::ios::trunc);
+        if (!file.is_open())
+            throw std::logic_error("file not open");
+
+        // init the file
+        file << "N\tL2_u\tH1_u\tL2_mult\tdof\th" << std::endl;
+
+        // we test all the meshes in the list
+        for(size_t i=0; i < nb_meshes; i++)
+        {
+            mesh_type msh;
+
+            disk::netgen_mesh_loader<T, 2> loader;
+
+            if( !loader.read_mesh(meshes.at(i)) )
+                std::cout << "error loading mesh !" << std::endl;
+            loader.populate_mesh(msh);
+
+            // test this mesh
+            auto TI = run_contact_solver(msh, degree);
+
+            // write the results in the file
+            file << i+1 << "\t" << TI.L2_u << "\t" << TI.H1_u << "\t"
+                 << TI.L2_mult
+                 << "\t" << TI.nb_dof << "\t" << TI.h_max
+                 << std::endl;
+        }
+
+        // close the file
+        file.close();
+    }
+}
+
+
 
 //////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   MAIN   /////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
 
-/*
- * TODO : prepare this section
- * mettre les solutions exactes en haut du fichier
- * and add the export to file (like in UC)
- */
-
-
-int main(void)
+/* run main with :
+   ./obstacle_Pk_Pk
+*/
+int main(int argc, char **argv)
 {
-    using T = double;
-
-    // degree of the polynomials on the faces
-    size_t degree = 0;
-
-    typedef disk::generic_mesh<T, 2>  mesh_type;
-    typedef disk::simplicial_mesh<T, 2>  mesh_type2;
-
-    if(1)
-    {
-        std::vector<std::string> meshfiles;
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_1.typ1");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_2.typ1");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_3.typ1");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_4.typ1");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_5.typ1");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/fvca5/mesh1_5.typ1");
-
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/mesh_j3.mesh2d");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/mesh_j4.mesh2d");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/mesh_j5.mesh2d");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/mesh_j6.mesh2d");
-        // meshfiles.push_back("../../../diskpp/meshes/2D_triangles/netgen/mesh_j7.mesh2d");
-
-        meshfiles.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d");
-        meshfiles.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri02.mesh2d");
-        meshfiles.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
-        meshfiles.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
-        meshfiles.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri05.mesh2d");
-
-        for(size_t i=0; i < meshfiles.size(); i++)
-        {
-            // mesh_type msh;
-            mesh_type2 msh;
-            // disk::fvca5_mesh_loader<T, 2> loader;
-            disk::netgen_mesh_loader<T, 2> loader;
-            if (!loader.read_mesh(meshfiles.at(i)) )
-            {
-                std::cout << "Problem loading mesh." << std::endl;
-            }
-            loader.populate_mesh(msh);
-            run_contact_solver(msh, degree);
-        }
-
-    }
-    else
-    {
-        mesh_type2 msh;
-        // disk::fvca5_mesh_loader<T, 2> loader;
-        disk::netgen_mesh_loader<T, 2> loader;
-        // std::string mesh_filename = "../../../diskpp/meshes/2D_triangles/fvca5/mesh1_4.typ1";
-        // std::string mesh_filename = "../../../diskpp/meshes/2D_triangles/netgen/mesh_j7.mesh2d";
-        std::string mesh_filename = "../../../../diskpp/meshes/2D_triangles/netgen/tri01.mesh2d";
-        if (!loader.read_mesh(mesh_filename) )
-        {
-            std::cout << "Problem loading mesh." << std::endl;
-        }
-        loader.populate_mesh(msh);
-        run_contact_solver(msh, degree);
-    }
-
-    std::cout << "\a" << std::endl;
+    tests_auto_2d<double>();
     return 0;
 }
