@@ -998,32 +998,16 @@ public:
             auto sol_u    = solT(i);
             auto sol_mult = multT(i);
 
-            if(sol_u <= 0.0 && sol_mult >= 0)
+            if( sol_u < sol_mult )
             {
                 active_constr.at(cell_offset * cbs + i) = true;
                 D(i,i) = 1.0;
             }
-            else if(sol_u >= 0.0 && sol_mult <= 0)
+            else
             {
                 active_constr.at(cell_offset * cbs + i) = false;
                 D(i,cbs + i) = 1.0;
             }
-            else if(sol_u * sol_mult > 0.0)
-            {
-                // this case is considered because of the error made during SC
-                if(sol_u < sol_mult)
-                {
-                    active_constr.at(cell_offset * cbs + i) = true;
-                    D(i,i) = 1.0;
-                }
-                else
-                {
-                    active_constr.at(cell_offset * cbs + i) = false;
-                    D(i,cbs + i) = 1.0;
-                }
-            }
-            else
-                throw std::logic_error("we should not arrive here !!");
         }
 
         auto SC = make_contact_SC(msh, cl, di, lhs, rhs, D);
@@ -1922,7 +1906,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
     auto assembler_sc = make_condensed_assembler_Lag(msh, hdi);
     auto assembler = make_assembler_Lag(msh, hdi);
 
-    bool scond = false; // static condensation
+    bool scond = true; // static condensation
 
     for (auto& cl : msh)
     {
