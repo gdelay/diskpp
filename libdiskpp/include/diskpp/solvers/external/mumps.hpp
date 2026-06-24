@@ -155,12 +155,15 @@ struct mumps_state
     MUMPS_STRUC             id;
     size_t                  mflops;
     /* From the MUMPS documentation it is not clear which
-     * should be the lifetime of Aii and Aja */
-    std::vector<int>        Aii, Aja;
+     * should be the lifetime of Airn and Ajcn */
+    std::vector<int>        Airn;
+    std::vector<int>        Ajcn;
 
     std::vector<int>        irhs_sparse;
     std::vector<int>        irhs_ptr;
     std::vector<T>          rhs_sparse;
+
+    bool fail = false;
 };
 
 template<typename T>
@@ -189,6 +192,10 @@ public:
         state->id.icntl[1]= -1;//6;    // Suppress diagnostic output
         state->id.icntl[2]= -1;//6;    // Suppress global output
         state->id.icntl[3]= 2;         // Loglevel
+    
+        if (state->id.infog[0] != 0) {
+            state->fail = true;
+        }
     }
     
     ~mumps_solver()
@@ -198,7 +205,7 @@ public:
     }
     
     template<int _Options, typename _Index>
-    void
+    bool
     factorize(Eigen::SparseMatrix<T, _Options, _Index>& A) const
     {
         static_assert( !(_Options & Eigen::RowMajor), "CSR not supported yet.");
@@ -214,40 +221,49 @@ public:
         int *   ja      = A.innerIndexPtr();
         int     is      = A.innerSize();
 
-        state->Aii.resize( A.nonZeros() );
+        state->Airn.resize( A.nonZeros() );
+        state->Ajcn.resize( A.nonZeros() );
 
-        /* Convert CSC to COO */
+        /* WARNING: here we deal with CSC and we want to convert
+         * to COO. Therefore here we extract COLUMN indices. */
         for (int i = 0; i < is; i++) {
             int begin = ia[i];
             int end = ia[i+1];
 
             for (size_t j = begin; j < end; j++) {
-                state->Aii[j] = i+1;
+                state->Ajcn[j] = i+1;
             }
         }
 
-        state->Aja.resize( A.nonZeros() );
+        /* And here we extract ROW indices */
         for (size_t i = 0; i < js; i++) {
-            state->Aja[i] = ja[i] + 1;
+            state->Airn[i] = ja[i] + 1;
         }
         
         state->id.a = mumps_priv::mumps_cast_from<T>(data);
-        state->id.irn = state->Aii.data();
-        state->id.jcn = state->Aja.data();
+        state->id.irn = state->Airn.data();
+        state->id.jcn = state->Ajcn.data();
         state->id.n = A.rows();
         state->id.nz = A.nonZeros();
 
         state->id.job = MUMPS_JOB_ANALYZE_FACTORIZE;
         mumps_priv::call_mumps(&state->id);
         state->mflops = (size_t)((state->id.rinfog[0] + state->id.rinfog[1])/1e6);
+        
+        if (state->id.infog[0] != 0) {
+            state->fail = true;
+            return false;
+        }
+        
+        return true;
     }
 
     /* Pseudo-compatibility with Eigen solver interface */
     template<int _Options, typename _Index>
-    void
-    compute(const Eigen::SparseMatrix<T, _Options, _Index>& A) const
+    bool
+    compute(Eigen::SparseMatrix<T, _Options, _Index>& A) const
     {
-        factorize(A);
+        return factorize(A);
     }
 
     template<int nrhs>
@@ -263,6 +279,10 @@ public:
         
         state->id.job = MUMPS_JOB_SOLVE;
         mumps_priv::call_mumps(&state->id);
+
+        if (state->id.infog[0] != 0) {
+            state->fail = true;
+        }
 
         return ret;
     }
@@ -326,6 +346,10 @@ public:
         state->id.irhs_ptr    = nullptr;
         state->id.rhs_sparse  = nullptr;
 
+        if (state->id.infog[0] != 0) {
+            state->fail = true;
+        }
+
         return X;
     }
     
@@ -369,9 +393,13 @@ public:
     {
         return state->mflops;
     }
+
+    bool failure() const {
+        return state->fail;
+    }
 };
 
-
+/*
 template<typename T, int _Options, typename _Index, _Index nrhs>
 Eigen::Matrix<T, Eigen::Dynamic, nrhs>
 mumps_ldlt(Eigen::SparseMatrix<T, _Options, _Index>& A, Eigen::Matrix<T, Eigen::Dynamic, nrhs>& b)
@@ -390,6 +418,7 @@ mumps_lu(Eigen::SparseMatrix<T, _Options, _Index>& A, Eigen::Matrix<T, Eigen::Dy
     solver.factorize(A);
     return solver.solve(b);
 }
+*/
 
 } // namespace disk::solvers
 

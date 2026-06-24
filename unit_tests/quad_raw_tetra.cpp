@@ -2,7 +2,7 @@
 #include <iomanip>
 
 #include "diskpp/quadratures/bits/quad_raw_tetra.hpp"
-#include "sgr.hpp"
+#include "sgr/sgr.hpp"
 
 using namespace disk;
 using namespace disk::quadrature;
