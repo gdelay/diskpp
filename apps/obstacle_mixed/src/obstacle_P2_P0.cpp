@@ -8,19 +8,16 @@
  * Dipartimento di Matematica
  *
  * This file is copyright of the following author:
- * Guillaume Delay (C) 2020-2021         guillaume.delay@sorbonne-universite.fr
+ * Guillaume Delay (C) 2026           guillaume.delay@sorbonne-universite.fr
  * Sorbonne Universite
  * Laboratoire Jacques-Louis Lions (LJLL)
  *
  */
 /*
- * The content of this file corresponds to solving an obstacle problem with Pk elements
- * using Pk Lagrange multipliers.
- *
- * This code implements the scheme proposed in :
- * Jad Dabaghi, Guillaume Delay
- * A unified framework for high-order numerical discretizations of variational inequalities
- * Computers and Mathematics with Applications 92 (2021) 62-75
+ * The content of this file corresponds to solving an obstacle problem with P2 elements
+ * in the cells, P1 elements on the faces and
+ * using P0 Lagrange multipliers.
+ * This code does not use Lagrange basis and then can consider more general meshes.
  */
 
 #include "gnuplot_output.hpp"
@@ -53,7 +50,7 @@ class contact_assembler
     std::vector<Triplet<T>> triplets;
     bool                    use_bnd;
     std::vector< Matrix<T, Dynamic, Dynamic> > loc_LHS;
-    std::vector< Matrix<T, Dynamic, 1> >       loc_RHS;
+    std::vector< Matrix<T, Dynamic, 1> >       loc_RHS, loc_N;
 
     size_t num_all_faces, num_dirichlet_faces, num_other_faces, system_size;
 
@@ -126,10 +123,27 @@ public:
 
         const auto fbs = scalar_basis_size(hdi.face_degree(), Mesh::dimension - 1);
         const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
-        system_size    = 2 * cbs * num_cells + fbs * num_other_faces;
+        system_size    = cbs * num_cells + fbs * num_other_faces + num_cells;
 
         LHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
+
+        // initialize the local constraint matrices (loc_N)
+        loc_N.resize( num_cells );
+        for (auto& cl : msh)
+        {
+            const auto cb = make_scalar_Lagrange_basis(msh, cl, hdi.cell_degree());
+            auto cell_offset = offset(msh, cl);
+            vector_type mean_cb = vector_type::Zero(cbs); // mean value of the basis functions
+            const auto qps = integrate(msh, cl, hdi.cell_degree());
+            for (auto& qp : qps)
+            {
+                auto t_phi = cb.eval_functions( qp.point() );
+                mean_cb += t_phi;
+            }
+            // store this vector
+            loc_N.at( cell_offset ) = mean_cb;
+        }
     }
 
     void
@@ -294,7 +308,7 @@ public:
         const auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension - 1);
         const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
-        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
+        for(size_t i = 0; i < msh.cells_size(); i++)
         {
             triplets.push_back( Triplet<T>(mult_offset + i, mult_offset + i, 1.0) );
         }
@@ -321,24 +335,37 @@ public:
         const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
 
-        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
+        for(auto& cl : msh)
         {
-            auto sol_u    = prev_sol(i);
-            auto sol_mult = prev_sol(mult_offset + i);
+            auto cell_offset = offset(msh, cl);
+            auto u_T = prev_sol.block(cell_offset*cbs, 0, cbs, 1);
 
-            if(sol_u < sol_mult)
+            auto mean_cb = loc_N.at( cell_offset ); // mean value of the basis functions
+            // T mean_u = priv::inner_product(mean_cb , u_T); // mean value of u_T over T
+            T mean_u = 0.;
+            for(size_t i=0; i<cbs; i++)
+                mean_u += mean_cb(i,0) * u_T(i,0);
+            auto sol_mult = prev_sol(mult_offset + cell_offset);
+
+            if(mean_u < sol_mult)
             {
-                triplets.push_back( Triplet<T>(mult_offset + i, i, 1.0) );
+                // impose the solution to be of null-mean-value in this cell
+                for(size_t i = 0; i < cbs; i++)
+                {
+                    triplets.push_back( Triplet<T>(mult_offset + cell_offset, cell_offset*cbs + i, mean_cb[i]) );
+                }
             }
             else
-                triplets.push_back( Triplet<T>(mult_offset + i, mult_offset + i, 1.0) );
+            {
+                // impose the multiplier to be zero in this cell
+                triplets.push_back( Triplet<T>(mult_offset + cell_offset, mult_offset + cell_offset, 1.0) );
+            }
 
-        }
-
-        // identity block
-        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
-        {
-            triplets.push_back( Triplet<T>(i, mult_offset + i, -1.0) );
+            // coupling term
+            for(size_t i = 0; i < cbs; i++)
+            {
+                triplets.push_back( Triplet<T>(cell_offset*cbs+i, mult_offset + cell_offset, -mean_cb[i]) );
+            }
         }
 
         // end assembly
@@ -357,12 +384,18 @@ public:
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
 
         bool ret = true;
-        for(size_t i = 0; i < cbs * msh.cells_size(); i++)
-        {
-            auto sol_u    = sol(i);
-            auto sol_mult = sol(mult_offset + i);
+        for(auto& cl : msh) {
+            auto cell_offset = offset(msh, cl);
+            auto u_T = sol.block(cell_offset*cbs, 0, cbs, 1);
 
-            if(sol_u < -TOL || sol_mult < -TOL)
+            auto mean_cb = loc_N.at( cell_offset ); // mean value of the basis functions
+            // T mean_u = mean_cb.dot(u_T); // mean value of u_T over T
+            T mean_u = 0.;
+            for(size_t i=0; i<cbs; i++)
+                mean_u += mean_cb(i,0) * u_T(i,0);
+            auto sol_mult = sol(mult_offset + cell_offset);
+
+            if(mean_u < -TOL || sol_mult < -TOL)
             {
                 ret = false;
                 break;
@@ -437,15 +470,11 @@ public:
 
         auto mult_offset = cbs * msh.cells_size() + fbs * num_other_faces;
         auto cell_offset        = offset(msh, cl);
-        auto cell_SOL_offset    = mult_offset + cell_offset * cbs;
+        auto cell_SOL_offset    = mult_offset + cell_offset;
 
-        vector_type multT_dual = solution.block(cell_SOL_offset, 0, cbs, 1);
+        vector_type multT = solution.block(cell_SOL_offset, 0, 1, 1);
 
-        const auto cb = make_scalar_Lagrange_basis(msh, cl, celdeg);
-        auto mass_matrixT = make_mass_matrix(msh, cl, cb);
-        vector_type multT_primal = mass_matrixT.ldlt().solve(multT_dual);
-
-        return multT_primal;
+        return multT;
     }
 
     void finalize(void)
@@ -1203,7 +1232,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
     auto assembler = make_assembler_Lag(msh, hdi);
     test_info<double> TI;
 
-    bool scond = true; // static condensation
+    bool scond = false; // static condensation
 
     for (auto& cl : msh)
     {
@@ -1347,7 +1376,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
             u_L2_error += qp.weight() * (sol_fun(qp.point()) - v) * (sol_fun(qp.point()) - v);
 
             // mult-L2-error
-            T mult = mult_sol.dot( t_phi );
+            T mult = mult_sol(0);
             T mult_ex = mult_fun(qp.point());
             mult_L2_error += qp.weight() * (mult_ex - mult) * (mult_ex - mult);
         }
@@ -1358,9 +1387,10 @@ run_contact_solver(const Mesh& msh, size_t degree)
         {
             T sol_uT = cell_dofs.dot( cb.eval_functions( pts[i] ) );
             uT_gp->add_data( pts[i], sol_uT );
-            T sol_multT = mult_sol.dot( cb.eval_functions(pts[i]) );
-            multT_gp->add_data( pts[i], sol_multT );
+            // T sol_multT = mult_sol.dot( cb.eval_functions(pts[i]) );
+            // multT_gp->add_data( pts[i], sol_multT );
         }
+        multT_gp->add_data( barycenter(msh,cl), mult_sol(0) );
     }
 
     postoutput.add_object(uT_gp);
@@ -1404,12 +1434,12 @@ tests_auto_2d()
     // list of export files
     std::vector<std::string> files;
     files.push_back("./test_k0.txt");
-    files.push_back("./test_k1.txt");
+    files.push_back("./test_P2_P0.txt");
     files.push_back("./test_k2.txt");
     files.push_back("./test_k3.txt");
 
-    // we test degrees 0 to 3
-    for(int degree=0; degree <= 3; degree++)
+    // we test degree 1
+    for(int degree=1; degree <= 1; degree++)
     {
         std::cout << " WORKING WITH k = " << degree << std::endl;
 
@@ -1455,7 +1485,7 @@ tests_auto_2d()
 //////////////////////////////////////////////////////////////////////////////////
 
 /* run main with :
-   ./obstacle_Pk_Pk
+   ./obstacle_P2_P0
 */
 int main(int argc, char **argv)
 {
