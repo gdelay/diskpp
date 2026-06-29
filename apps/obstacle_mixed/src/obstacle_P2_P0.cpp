@@ -139,7 +139,7 @@ public:
             for (auto& qp : qps)
             {
                 auto t_phi = cb.eval_functions( qp.point() );
-                mean_cb += t_phi;
+                mean_cb += qp.weight() * t_phi;
             }
             // store this vector
             loc_N.at( cell_offset ) = mean_cb;
