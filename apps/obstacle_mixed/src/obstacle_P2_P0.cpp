@@ -505,11 +505,12 @@ auto make_assembler_Lag(const Mesh& msh, hho_degree_info hdi)
 template<typename Mesh, typename T>
 auto
 make_contact_SC(const Mesh&                                                      msh,
-                 const typename Mesh::cell_type&                                  cl,
-                 const hho_degree_info&                                           hdi,
-                 const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& lhs,
-                 const typename Eigen::Matrix<T, Eigen::Dynamic, 1>&              rhs,
-                 const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& D)
+                const typename Mesh::cell_type&                                  cl,
+                const hho_degree_info&                                           hdi,
+                const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& lhs,
+                const typename Eigen::Matrix<T, Eigen::Dynamic, 1>&              rhs,
+                const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& D,
+                const typename Eigen::Matrix<T, Eigen::Dynamic, 1>& N_T)
 {
     using matrix_type = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_type = Eigen::Matrix<T, Eigen::Dynamic, 1>;
@@ -525,8 +526,8 @@ make_contact_SC(const Mesh&                                                     
 
     assert(lhs.rows() == lhs.cols());
     assert(lhs.cols() == num_total_dofs);
-    assert(D.rows()   == num_cell_dofs);
-    assert(D.cols()   == 2 * num_cell_dofs);
+    assert(D.rows()   == 1);
+    assert(D.cols()   == num_cell_dofs + 1);
     if ((rhs.size() != num_cell_dofs) && (rhs.size() != num_total_dofs))
     {
         throw std::invalid_argument("static condensation: incorrect size of the rhs");
@@ -551,8 +552,8 @@ make_contact_SC(const Mesh&                                                     
         faces_rhs = rhs.tail(num_faces_dofs);
     }
 
-    const matrix_type C_TT = D.topLeftCorner(num_cell_dofs, num_cell_dofs);
-    const matrix_type D_TT = D.topRightCorner(num_cell_dofs, num_cell_dofs);
+    const matrix_type D_TT = D.topLeftCorner(1, num_cell_dofs);
+    const matrix_type D_lam = D.topRightCorner(1, 1);
 
     const auto K_TT_ldlt = K_TT.ldlt();
     if (K_TT_ldlt.info() != Eigen::Success)
@@ -566,11 +567,12 @@ make_contact_SC(const Mesh&                                                     
     const auto ID = matrix_type::Identity(num_cell_dofs, num_cell_dofs);
     const auto K_TT_inv = K_TT_ldlt.solve(ID);
 
-    const auto E = C_TT * K_TT_inv + D_TT;
+    const auto E = D_TT * K_TT_inv * N_T + D_lam;
     const auto E_inv = E.inverse();
 
-    const matrix_type E2 = E_inv * C_TT;
-    const matrix_type E3 = K_TT_ldlt.solve(E2);
+    const matrix_type E2 = E_inv * D_TT;
+    const matrix_type E2_bis = N_T * E2;
+    const matrix_type E3 = K_TT_ldlt.solve(E2_bis);
 
     const matrix_type AC = K_FF - K_FT * AL + K_FT * E3 * AL;
     const vector_type bC = faces_rhs - K_FT * bL + K_FT * E3 * bL;
@@ -583,12 +585,13 @@ make_contact_SC(const Mesh&                                                     
 template<typename Mesh, typename T>
 Eigen::Matrix<T, Eigen::Dynamic, 1>
 contact_static_decondensation(const Mesh&                                                      msh,
-                               const typename Mesh::cell_type&                                  cl,
-                               const hho_degree_info&                                           hdi,
-                               const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& lhs,
-                               const typename Eigen::Matrix<T, Eigen::Dynamic, 1>&              rhs,
-                               const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& D,
-                               const typename Eigen::Matrix<T, Eigen::Dynamic, 1>&              solF)
+                              const typename Mesh::cell_type&                                  cl,
+                              const hho_degree_info&                                           hdi,
+                              const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& lhs,
+                              const typename Eigen::Matrix<T, Eigen::Dynamic, 1>&              rhs,
+                              const typename Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& D,
+                              const typename Eigen::Matrix<T, Eigen::Dynamic, 1>& N_T,
+                              const typename Eigen::Matrix<T, Eigen::Dynamic, 1>&              solF)
 {
     using matrix_type = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
     using vector_type = Eigen::Matrix<T, Eigen::Dynamic, 1>;
@@ -613,8 +616,8 @@ contact_static_decondensation(const Mesh&                                       
     const matrix_type K_TT = lhs.topLeftCorner(num_cell_dofs, num_cell_dofs);
     const matrix_type K_TF = lhs.topRightCorner(num_cell_dofs, num_faces_dofs);
 
-    const matrix_type C_TT = D.topLeftCorner(num_cell_dofs, num_cell_dofs);
-    const matrix_type D_TT = D.topRightCorner(num_cell_dofs, num_cell_dofs);
+    const matrix_type D_TT = D.topLeftCorner(1, num_cell_dofs);
+    const matrix_type D_lam = D.topRightCorner(1, 1);
 
     vector_type uF = solF.head(num_faces_dofs);
 
@@ -627,18 +630,17 @@ contact_static_decondensation(const Mesh&                                       
     const auto ID = matrix_type::Identity(num_cell_dofs, num_cell_dofs);
     const auto K_TT_inv = K_TT_ldlt.solve(ID);
 
-    const auto E_inv = (C_TT * K_TT_inv + D_TT).inverse();
-    const matrix_type E2 = E_inv * C_TT;
-
-    const vector_type solT = K_TT_ldlt.solve(rhs.head(num_cell_dofs) - K_TF * uF)
-        - K_TT_inv * E2 * K_TT_ldlt.solve(rhs.head(num_cell_dofs) - K_TF * uF);
+    const auto E_inv = (D_TT * K_TT_inv * N_T + D_lam).inverse();
+    const matrix_type E2 = E_inv * D_TT;
 
     const vector_type multT = - E2 * K_TT.ldlt().solve(rhs.head(num_cell_dofs) - K_TF * uF);
 
-    vector_type ret          = vector_type::Zero(num_total_dofs + num_cell_dofs);
+    const vector_type solT = K_TT_ldlt.solve(rhs.head(num_cell_dofs) - K_TF * uF + N_T * multT);
+
+    vector_type ret          = vector_type::Zero(num_total_dofs + 1);
     ret.head(num_cell_dofs)  = solT;
     ret.block(num_cell_dofs, 0, num_faces_dofs, 1) = uF;
-    ret.block(num_total_dofs, 0, num_cell_dofs, 1) = multT;
+    ret.block(num_total_dofs, 0, 1, 1) = multT;
 
     return ret;
 }
@@ -664,7 +666,7 @@ class contact_condensed_assembler
     std::vector<Triplet<T>> triplets;
     bool                    use_bnd;
     std::vector< Matrix<T, Dynamic, Dynamic> > loc_LHS;
-    std::vector< Matrix<T, Dynamic, 1> >       loc_RHS;
+    std::vector< Matrix<T, Dynamic, 1> >       loc_RHS, loc_N;
     std::vector< bool >     active_constr;
 
     size_t num_all_faces, num_dirichlet_faces, num_other_faces, system_size;
@@ -740,10 +742,27 @@ public:
         const auto cbs = scalar_basis_size(hdi.cell_degree(), Mesh::dimension);
         system_size = fbs * num_other_faces;
 
-        active_constr.resize(num_cells * cbs);
+        active_constr.resize(num_cells);
 
         LHS = SparseMatrix<T>(system_size, system_size);
         RHS = vector_type::Zero(system_size);
+
+        // initialize the local constraint matrices (loc_N)
+        loc_N.resize( num_cells );
+        for (auto& cl : msh)
+        {
+            const auto cb = make_scalar_Lagrange_basis(msh, cl, hdi.cell_degree());
+            auto cell_offset = offset(msh, cl);
+            vector_type mean_cb = vector_type::Zero(cbs); // mean value of the basis functions
+            const auto qps = integrate(msh, cl, hdi.cell_degree());
+            for (auto& qp : qps)
+            {
+                auto t_phi = cb.eval_functions( qp.point() );
+                mean_cb += qp.weight() * t_phi;
+            }
+            // store this vector
+            loc_N.at( cell_offset ) = mean_cb;
+        }
     }
 
     void
@@ -755,10 +774,7 @@ public:
         auto cell_offset = offset(msh, cl);
         loc_LHS.at( cell_offset ) = lhs;
         loc_RHS.at( cell_offset ) = rhs;
-
-        const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
-        for(size_t i = cell_offset * cbs; i < cell_offset * cbs + cbs; i++)
-            active_constr.at(i) = false;
+        active_constr.at( cell_offset ) = false;
     }
 
     template<typename Function>
@@ -778,29 +794,40 @@ public:
         };
 
         auto cell_offset = offset(msh, cl);
+        auto mean_cb = loc_N.at(cell_offset);
 
         const auto cbs = scalar_basis_size(di.cell_degree(), Mesh::dimension);
         const auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension-1);
         const auto fcs = faces(msh, cl);
 
-        matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-
-        for(size_t i = 0; i < cbs; i++)
+        matrix_type D = matrix_type::Zero(1, cbs+1); // matrix of constraints in the present cell
+        if( active_constr.at( cell_offset ) )
         {
-            auto OFF = cell_offset * cbs;
-            if( active_constr.at(OFF + i) )
-                D(i,i) = 1.0;
-            else
-                D(i,cbs + i) = 1.0;
+            for(size_t i = 0; i < cbs; i++)
+                D(0,i) = mean_cb(i);
+        }
+        else
+        {
+            D(0,cbs) = 1.;
         }
 
-        auto loc_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, solF);
+        // for(size_t i = 0; i < cbs; i++)
+        // {
+        //     auto OFF = cell_offset * cbs;
+        //     if( active_constr.at(OFF + i) )
+        //         D(i,i) = 1.0;
+        //     else
+        //         D(i,cbs + i) = 1.0;
+        // }
+
+        auto loc_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, mean_cb, solF);
 
         vector_type solT = loc_sol.head(cbs);
-        vector_type multT = loc_sol.block(cbs + fcs.size() * fbs, 0, cbs, 1);
+        vector_type multT = loc_sol.block(cbs + fcs.size() * fbs, 0, 1, 1);
 
 
-        D = matrix_type::Zero(cbs, 2*cbs);
+        // /!\ TODO : reprendre ici la maj du fichier !!!
+        D = matrix_type::Zero(1, cbs + 1);
 
         for(size_t i = 0; i < cbs; i++)
         {
@@ -819,7 +846,7 @@ public:
             }
         }
 
-        auto SC = make_contact_SC(msh, cl, di, lhs, rhs, D);
+        auto SC = make_contact_SC(msh, cl, di, lhs, rhs, D, mean_cb);
         matrix_type lhs_sc = SC.first;
         vector_type rhs_sc = SC.second;
 
@@ -979,19 +1006,30 @@ public:
         for (auto& cl : msh)
         {
             auto cell_offset = offset(msh, cl);
-            matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-            for(size_t i = 0; i < cbs; i++)
+            auto mean_cb = loc_N.at(cell_offset);
+            matrix_type D = matrix_type::Zero(1, cbs+1); // matrix of constraints in the present cell
+            if( active_constr.at( cell_offset ) )
             {
-                auto OFF = cell_offset * cbs;
-                if( active_constr.at(OFF + i) )
-                    D(i,i) = 1.0;
-                else
-                    D(i,cbs + i) = 1.0;
+                for(size_t i = 0; i < cbs; i++)
+                    D(0,i) = mean_cb(i);
             }
+            else
+            {
+                D(0,cbs) = 1.;
+            }
+            // matrix_type D = matrix_type::Zero(cbs, 2*cbs);
+            // for(size_t i = 0; i < cbs; i++)
+            // {
+            //     auto OFF = cell_offset * cbs;
+            //     if( active_constr.at(OFF + i) )
+            //         D(i,i) = 1.0;
+            //     else
+            //         D(i,cbs + i) = 1.0;
+            // }
 
             auto solF = get_solF(msh, cl, sol, dirichlet_bf);
 
-            auto loc_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, solF);
+            auto loc_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, mean_cb, solF);
 
             const auto fcs = faces(msh, cl);
             vector_type solT = loc_sol.head(cbs);
@@ -1023,22 +1061,33 @@ public:
         auto celdeg = di.cell_degree();
         auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
 
-        matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-
-        for(size_t i = 0; i < cbs; i++)
+        auto mean_cb = loc_N.at(cell_offset);
+        matrix_type D = matrix_type::Zero(1, cbs+1); // matrix of constraints in the present cell
+        if( active_constr.at( cell_offset ) )
         {
-            auto OFF = cell_offset * cbs;
-            if( active_constr.at(OFF + i) )
-                D(i,i) = 1.0;
-            else
-                D(i,cbs + i) = 1.0;
+            for(size_t i = 0; i < cbs; i++)
+                D(0,i) = mean_cb(i);
         }
+        else
+        {
+            D(0,cbs) = 1.;
+        }
+        // matrix_type D = matrix_type::Zero(cbs, 2*cbs);
+
+        // for(size_t i = 0; i < cbs; i++)
+        // {
+        //     auto OFF = cell_offset * cbs;
+        //     if( active_constr.at(OFF + i) )
+        //         D(i,i) = 1.0;
+        //     else
+        //         D(i,cbs + i) = 1.0;
+        // }
 
         auto facdeg = di.face_degree();
         auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension-1);
         auto num_faces = howmany_faces(msh, cl);
 
-        vector_type full_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, solF);
+        vector_type full_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, mean_cb, solF);
 
         return full_sol.head(cbs + num_faces * fbs);
     }
@@ -1055,18 +1104,29 @@ public:
         auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
         const auto cb = make_scalar_Lagrange_basis(msh, cl, celdeg);
 
-        matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-
-        for(size_t i = 0; i < cbs; i++)
+        auto mean_cb = loc_N.at(cell_offset);
+        matrix_type D = matrix_type::Zero(1, cbs+1); // matrix of constraints in the present cell
+        if( active_constr.at( cell_offset ) )
         {
-            auto OFF = cell_offset * cbs;
-            if( active_constr.at(OFF + i) )
-                D(i,i) = 1.0;
-            else
-                D(i,cbs + i) = 1.0;
+            for(size_t i = 0; i < cbs; i++)
+                D(0,i) = mean_cb(i);
         }
+        else
+        {
+            D(0,cbs) = 1.;
+        }
+        // matrix_type D = matrix_type::Zero(cbs, 2*cbs);
 
-        auto full_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, solF);
+        // for(size_t i = 0; i < cbs; i++)
+        // {
+        //     auto OFF = cell_offset * cbs;
+        //     if( active_constr.at(OFF + i) )
+        //         D(i,i) = 1.0;
+        //     else
+        //         D(i,cbs + i) = 1.0;
+        // }
+
+        auto full_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, mean_cb, solF);
 
         auto facdeg = di.face_degree();
         auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension-1);
@@ -1232,7 +1292,7 @@ run_contact_solver(const Mesh& msh, size_t degree)
     auto assembler = make_assembler_Lag(msh, hdi);
     test_info<double> TI;
 
-    bool scond = false; // static condensation
+    bool scond = true; // static condensation
 
     for (auto& cl : msh)
     {
@@ -1483,6 +1543,15 @@ tests_auto_2d()
 //////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   MAIN   /////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
+/*
+ *
+ * TODO :
+ * finir de mettre en place la SC
+ * Nettoyer le commit de la condensation statique : le calcul des D
+ * utiliser des bases standards (pas Lagrange)
+ *
+ *
+ */
 
 /* run main with :
    ./obstacle_P2_P0
