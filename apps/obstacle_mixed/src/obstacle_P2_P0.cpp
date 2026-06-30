@@ -391,7 +391,6 @@ public:
             auto u_T = sol.block(cell_offset*cbs, 0, cbs, 1);
 
             auto mean_cb = loc_N.at( cell_offset ); // mean value of the basis functions
-            // T mean_u = mean_cb.dot(u_T); // mean value of u_T over T
             T mean_u = 0.;
             for(size_t i=0; i<cbs; i++)
                 mean_u += mean_cb(i,0) * u_T(i,0);
@@ -1439,6 +1438,7 @@ void
 tests_auto_2d()
 {
     typedef disk::simplicial_mesh<T, 2>  mesh_type;
+    // typedef disk::generic_mesh<double, 2> mesh_type;
 
     // list of mesh files
     std::vector<std::string> meshes;
@@ -1447,6 +1447,13 @@ tests_auto_2d()
     meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri03.mesh2d");
     meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri04.mesh2d");
     meshes.push_back("../../../../diskpp/meshes/2D_triangles/netgen/tri05.mesh2d");
+
+    // meshes.push_back("../../../../diskpp/meshes/2D_hex/fvca5/hexagonal_1.typ1");
+    // meshes.push_back("../../../../diskpp/meshes/2D_hex/fvca5/hexagonal_2.typ1");
+    // meshes.push_back("../../../../diskpp/meshes/2D_hex/fvca5/hexagonal_3.typ1");
+    // meshes.push_back("../../../../diskpp/meshes/2D_hex/fvca5/hexagonal_4.typ1");
+    // meshes.push_back("../../../../diskpp/meshes/2D_hex/fvca5/hexagonal_5.typ1");
+
 
     size_t nb_meshes = meshes.size();
 
@@ -1477,6 +1484,7 @@ tests_auto_2d()
             mesh_type msh;
 
             disk::netgen_mesh_loader<T, 2> loader;
+            // disk::fvca5_mesh_loader<T, 2> loader;
 
             if( !loader.read_mesh(meshes.at(i)) )
                 std::cout << "error loading mesh !" << std::endl;
@@ -1502,13 +1510,6 @@ tests_auto_2d()
 //////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////   MAIN   /////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
-/*
- *
- * TODO :
- * Nettoyer le commit de la condensation statique : le calcul des D
- * changer la description en haut du fichier
- *
- */
 
 /* run main with :
    ./obstacle_P2_P0
