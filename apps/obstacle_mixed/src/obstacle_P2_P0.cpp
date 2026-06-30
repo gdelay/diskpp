@@ -21,7 +21,8 @@
  */
 
 #include "gnuplot_output.hpp"
-#include "Lagrange_hho.hpp"
+#include "diskpp/bases/bases.hpp"
+#include "diskpp/methods/hho"
 
 // For the mesh data structure
 #include "diskpp/mesh/mesh.hpp"
@@ -31,6 +32,7 @@
 
 #include "diskpp/solvers/direct_solvers.hpp"
 
+using namespace disk;
 using disk::cells;
 using disk::faces;
 
@@ -132,7 +134,7 @@ public:
         loc_N.resize( num_cells );
         for (auto& cl : msh)
         {
-            const auto cb = make_scalar_Lagrange_basis(msh, cl, hdi.cell_degree());
+            const auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
             auto cell_offset = offset(msh, cl);
             vector_type mean_cb = vector_type::Zero(cbs); // mean value of the basis functions
             const auto qps = integrate(msh, cl, hdi.cell_degree());
@@ -199,7 +201,7 @@ public:
 
             if (dirichlet)
             {
-                auto fb = make_scalar_Lagrange_basis(msh, fc, di.face_degree());
+                auto fb = make_scalar_monomial_basis(msh, fc, di.face_degree());
                 dirichlet_data.block(cbs + face_i * fbs, 0, fbs, 1) =
                   project_function(msh, fc, fb, dirichlet_bf, di.face_degree());
             }
@@ -263,7 +265,7 @@ public:
 
             if (dirichlet)
             {
-                auto fb = make_scalar_Lagrange_basis(msh, fc, di.face_degree());
+                auto fb = make_scalar_monomial_basis(msh, fc, di.face_degree());
                 dirichlet_data.block(cbs + face_i * fbs, 0, fbs, 1) =
                   project_function(msh, fc, fb, dirichlet_bf, di.face_degree());
             }
@@ -438,7 +440,7 @@ public:
 
             if (dirichlet)
             {
-                auto fb = make_scalar_Lagrange_basis(msh, fc, di.face_degree());
+                auto fb = make_scalar_monomial_basis(msh, fc, di.face_degree());
 
                 matrix_type mass = make_mass_matrix(msh, fc, fb, di.face_degree());
                 vector_type rhs = make_rhs(msh, fc, fb, dirichlet_bf, di.face_degree());
@@ -492,7 +494,7 @@ public:
 
 };
 template<typename Mesh>
-auto make_assembler_Lag(const Mesh& msh, hho_degree_info hdi)
+auto make_assembler_P2_P0(const Mesh& msh, hho_degree_info hdi)
 {
     return contact_assembler<Mesh>(msh, hdi);
 }
@@ -751,7 +753,7 @@ public:
         loc_N.resize( num_cells );
         for (auto& cl : msh)
         {
-            const auto cb = make_scalar_Lagrange_basis(msh, cl, hdi.cell_degree());
+            const auto cb = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
             auto cell_offset = offset(msh, cl);
             vector_type mean_cb = vector_type::Zero(cbs); // mean value of the basis functions
             const auto qps = integrate(msh, cl, hdi.cell_degree());
@@ -859,7 +861,7 @@ public:
 
             if (dirichlet)
             {
-                auto fb = make_scalar_Lagrange_basis(msh, fc, di.face_degree());
+                auto fb = make_scalar_monomial_basis(msh, fc, di.face_degree());
                 dirichlet_data.block(face_i * fbs, 0, fbs, 1) =
                   project_function(msh, fc, fb, dirichlet_bf, di.face_degree());
             }
@@ -944,7 +946,7 @@ public:
 
             if (dirichlet)
             {
-                auto fb = make_scalar_Lagrange_basis(msh, fc, di.face_degree());
+                auto fb = make_scalar_monomial_basis(msh, fc, di.face_degree());
 
                 matrix_type mass = make_mass_matrix(msh, fc, fb, di.face_degree());
                 vector_type rhs = make_rhs(msh, fc, fb, dirichlet_bf, di.face_degree());
@@ -1072,7 +1074,7 @@ public:
         auto cell_offset        = offset(msh, cl);
         auto celdeg = di.cell_degree();
         auto cbs = scalar_basis_size(celdeg, Mesh::dimension);
-        const auto cb = make_scalar_Lagrange_basis(msh, cl, celdeg);
+        const auto cb = make_scalar_monomial_basis(msh, cl, celdeg);
 
         auto mean_cb = loc_N.at(cell_offset);
         matrix_type D = matrix_type::Zero(1, cbs+1); // matrix of constraints in the present cell
@@ -1111,7 +1113,7 @@ public:
 
 };
 template<typename Mesh>
-auto make_condensed_assembler_Lag(const Mesh& msh, hho_degree_info hdi)
+auto make_condensed_assembler_P2_P0(const Mesh& msh, hho_degree_info hdi)
 {
     return contact_condensed_assembler<Mesh>(msh, hdi);
 }
@@ -1245,17 +1247,17 @@ run_contact_solver(const Mesh& msh, size_t degree)
     };
 #endif
 
-    auto assembler_sc = make_condensed_assembler_Lag(msh, hdi);
-    auto assembler = make_assembler_Lag(msh, hdi);
+    auto assembler_sc = make_condensed_assembler_P2_P0(msh, hdi);
+    auto assembler = make_assembler_P2_P0(msh, hdi);
     test_info<double> TI;
 
     bool scond = true; // static condensation
 
     for (auto& cl : msh)
     {
-        auto cb     = make_scalar_Lagrange_basis(msh, cl, hdi.cell_degree());
-        auto gr     = make_vector_hho_gradrec_Lag(msh, cl, hdi);
-        auto stab   = make_scalar_hdg_stabilization_Lag(msh, cl, hdi);
+        auto cb     = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
+        auto gr     = make_vector_hho_gradrec(msh, cl, hdi);
+        auto stab   = make_scalar_hdg_stabilization(msh, cl, hdi);
         auto rhs    = make_rhs(msh, cl, cb, rhs_fun);
         Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> A = gr.second + stab;
         if(scond)
@@ -1349,13 +1351,13 @@ run_contact_solver(const Mesh& msh, size_t degree)
 
     for (auto& cl : msh)
     {
-        auto cb     = make_scalar_Lagrange_basis(msh, cl, hdi.cell_degree());
+        auto cb     = make_scalar_monomial_basis(msh, cl, hdi.cell_degree());
         auto cbs = cb.size();
 
         Eigen::Matrix<T, Eigen::Dynamic, 1> realsol = project_function(msh, cl, cb, sol_fun, 2);
         Eigen::Matrix<T, Eigen::Dynamic, 1> fullsol, mult_sol;
-        auto gr     = make_vector_hho_gradrec_Lag(msh, cl, hdi);
-        auto stab   = make_scalar_hdg_stabilization_Lag(msh, cl, hdi);
+        auto gr     = make_vector_hho_gradrec(msh, cl, hdi);
+        auto stab   = make_scalar_hdg_stabilization(msh, cl, hdi);
         auto rhs    = make_rhs(msh, cl, cb, rhs_fun);
         Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> A = gr.second + stab;
 
@@ -1504,8 +1506,7 @@ tests_auto_2d()
  *
  * TODO :
  * Nettoyer le commit de la condensation statique : le calcul des D
- * utiliser des bases standards (pas Lagrange)
- *
+ * changer la description en haut du fichier
  *
  */
 
