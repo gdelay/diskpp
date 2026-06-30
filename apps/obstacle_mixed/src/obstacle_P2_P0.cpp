@@ -811,39 +811,30 @@ public:
             D(0,cbs) = 1.;
         }
 
-        // for(size_t i = 0; i < cbs; i++)
-        // {
-        //     auto OFF = cell_offset * cbs;
-        //     if( active_constr.at(OFF + i) )
-        //         D(i,i) = 1.0;
-        //     else
-        //         D(i,cbs + i) = 1.0;
-        // }
-
         auto loc_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, mean_cb, solF);
 
         vector_type solT = loc_sol.head(cbs);
-        vector_type multT = loc_sol.block(cbs + fcs.size() * fbs, 0, 1, 1);
+        T multT = loc_sol(cbs + fcs.size() * fbs);
 
-
-        // /!\ TODO : reprendre ici la maj du fichier !!!
         D = matrix_type::Zero(1, cbs + 1);
 
+        T mean_u = 0.;
         for(size_t i = 0; i < cbs; i++)
-        {
-            auto sol_u    = solT(i);
-            auto sol_mult = multT(i);
+            mean_u += mean_cb(i,0) * solT(i,0);
 
-            if( sol_u < sol_mult )
+        if(mean_u < multT)
+        {
+            // impose the solution to be of null-mean-value in this cell
+            active_constr.at( cell_offset ) = true;
+            for(size_t i = 0; i < cbs; i++)
             {
-                active_constr.at(cell_offset * cbs + i) = true;
-                D(i,i) = 1.0;
+                D(0,i) = mean_cb(i);
             }
-            else
-            {
-                active_constr.at(cell_offset * cbs + i) = false;
-                D(i,cbs + i) = 1.0;
-            }
+        }
+        else
+        {
+            active_constr.at( cell_offset ) = false;
+            D(0,cbs) = 1.;
         }
 
         auto SC = make_contact_SC(msh, cl, di, lhs, rhs, D, mean_cb);
@@ -1017,15 +1008,6 @@ public:
             {
                 D(0,cbs) = 1.;
             }
-            // matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-            // for(size_t i = 0; i < cbs; i++)
-            // {
-            //     auto OFF = cell_offset * cbs;
-            //     if( active_constr.at(OFF + i) )
-            //         D(i,i) = 1.0;
-            //     else
-            //         D(i,cbs + i) = 1.0;
-            // }
 
             auto solF = get_solF(msh, cl, sol, dirichlet_bf);
 
@@ -1033,16 +1015,14 @@ public:
 
             const auto fcs = faces(msh, cl);
             vector_type solT = loc_sol.head(cbs);
-            vector_type multT = loc_sol.block(cbs + fcs.size() * fbs, 0, cbs, 1);
+            T multT = loc_sol(cbs + fcs.size() * fbs);
 
+            T mean_u = 0.;
             for(size_t i = 0; i < cbs; i++)
-            {
-                auto sol_u    = solT(i);
-                auto sol_mult = multT(i);
+                mean_u += mean_cb(i,0) * solT(i,0);
 
-                if(sol_u < -TOL || sol_mult < -TOL)
-                    return false;
-            }
+            if(mean_u < -TOL || multT < -TOL)
+                return false;
         }
 
         return true;
@@ -1072,16 +1052,6 @@ public:
         {
             D(0,cbs) = 1.;
         }
-        // matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-
-        // for(size_t i = 0; i < cbs; i++)
-        // {
-        //     auto OFF = cell_offset * cbs;
-        //     if( active_constr.at(OFF + i) )
-        //         D(i,i) = 1.0;
-        //     else
-        //         D(i,cbs + i) = 1.0;
-        // }
 
         auto facdeg = di.face_degree();
         auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension-1);
@@ -1115,16 +1085,6 @@ public:
         {
             D(0,cbs) = 1.;
         }
-        // matrix_type D = matrix_type::Zero(cbs, 2*cbs);
-
-        // for(size_t i = 0; i < cbs; i++)
-        // {
-        //     auto OFF = cell_offset * cbs;
-        //     if( active_constr.at(OFF + i) )
-        //         D(i,i) = 1.0;
-        //     else
-        //         D(i,cbs + i) = 1.0;
-        // }
 
         auto full_sol = contact_static_decondensation(msh, cl, di, loc_LHS.at( cell_offset ), loc_RHS.at( cell_offset ), D, mean_cb, solF);
 
@@ -1132,11 +1092,8 @@ public:
         auto fbs = scalar_basis_size(di.face_degree(), Mesh::dimension-1);
         auto num_faces = howmany_faces(msh, cl);
 
-        auto multT_dual = full_sol.tail(cbs);
-        auto mass_matrixT = make_mass_matrix(msh, cl, cb);
-        vector_type multT_primal = mass_matrixT.ldlt().solve(multT_dual);
-
-        return multT_primal;
+        auto multT = full_sol.block( cbs + num_faces * fbs, 0, 1, 1);
+        return multT;
     }
 
     void finalize(void)
@@ -1546,7 +1503,6 @@ tests_auto_2d()
 /*
  *
  * TODO :
- * finir de mettre en place la SC
  * Nettoyer le commit de la condensation statique : le calcul des D
  * utiliser des bases standards (pas Lagrange)
  *
