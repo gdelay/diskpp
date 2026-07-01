@@ -1256,11 +1256,12 @@ auto make_membrane_condensed_assembler_Lag(const Mesh& msh, hho_degree_info hdi)
 template<typename T>
 class test_info {
 public:
-    test_info() : H1_u(0.) , L2_u(0.) , L2_mult(0.) , nb_dof(0) {}
+    test_info() : H1_u(0.) , L2_u(0.) , L2_mult(0.) , nb_dof(0), nb_Newton_iter(0) {}
     T H1_u; // H1-error for u
     T L2_u; // L2-error for u
     T L2_mult; // L2-error for mult
     size_t nb_dof; // number of degrees of freedom of the linear system
+    size_t nb_Newton_iter; // number of iterations for the Newton loop
     T h_max; // maximal cell diameter
 };
 
@@ -1732,6 +1733,7 @@ run_membranes_solver(const Mesh& msh, size_t degree)
     TI.H1_u = std::sqrt(u_H1_error);
     TI.L2_u = std::sqrt(u_L2_error);
     TI.L2_mult = std::sqrt(mult_L2_error);
+    TI.nb_Newton_iter = Newton_iter;
     TI.h_max = average_diameter(msh);
     
     return TI;
@@ -1777,7 +1779,7 @@ tests_auto_2d()
             throw std::logic_error("file not open");
 
         // init the file
-        file << "N\tL2_u\tH1_u\tL2_mult\tdof\th" << std::endl;
+        file << "N\tL2_u\tH1_u\tL2_mult\tdof\tnb_Newton_iter\th" << std::endl;
 
         // we test all the meshes in the list
         for(size_t i=0; i < nb_meshes; i++)
@@ -1796,7 +1798,8 @@ tests_auto_2d()
             // write the results in the file
             file << i+1 << "\t" << TI.L2_u << "\t" << TI.H1_u << "\t"
                  << TI.L2_mult
-                 << "\t" << TI.nb_dof << "\t" << TI.h_max
+                 << "\t" << TI.nb_dof << "\t" << TI.nb_Newton_iter
+                 << "\t" << TI.h_max
                  << std::endl;
         }
 
